@@ -59,6 +59,216 @@ export type Database = {
         }
         Relationships: []
       }
+      coins: {
+        Row: {
+          coingecko_coin_url: string | null
+          created_at: string
+          first_seen: string
+          id: string
+          name: string
+          official_links: Json | null
+          status: Database["public"]["Enums"]["coin_status"]
+          symbol: string
+          updated_at: string
+        }
+        Insert: {
+          coingecko_coin_url?: string | null
+          created_at?: string
+          first_seen?: string
+          id?: string
+          name: string
+          official_links?: Json | null
+          status?: Database["public"]["Enums"]["coin_status"]
+          symbol: string
+          updated_at?: string
+        }
+        Update: {
+          coingecko_coin_url?: string | null
+          created_at?: string
+          first_seen?: string
+          id?: string
+          name?: string
+          official_links?: Json | null
+          status?: Database["public"]["Enums"]["coin_status"]
+          symbol?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      facts: {
+        Row: {
+          as_of: string
+          coin_id: string
+          created_at: string
+          extracted: Json
+          id: string
+          sources: Json | null
+          updated_at: string
+        }
+        Insert: {
+          as_of?: string
+          coin_id: string
+          created_at?: string
+          extracted?: Json
+          id?: string
+          sources?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          as_of?: string
+          coin_id?: string
+          created_at?: string
+          extracted?: Json
+          id?: string
+          sources?: Json | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "facts_coin_id_fkey"
+            columns: ["coin_id"]
+            isOneToOne: false
+            referencedRelation: "coins"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pages: {
+        Row: {
+          coin_id: string
+          content_excerpt: string | null
+          content_hash: string | null
+          content_text: string | null
+          created_at: string
+          fetched_at: string | null
+          http_status: number | null
+          id: string
+          status: Database["public"]["Enums"]["page_status"]
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          coin_id: string
+          content_excerpt?: string | null
+          content_hash?: string | null
+          content_text?: string | null
+          created_at?: string
+          fetched_at?: string | null
+          http_status?: number | null
+          id?: string
+          status?: Database["public"]["Enums"]["page_status"]
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          coin_id?: string
+          content_excerpt?: string | null
+          content_hash?: string | null
+          content_text?: string | null
+          created_at?: string
+          fetched_at?: string | null
+          http_status?: number | null
+          id?: string
+          status?: Database["public"]["Enums"]["page_status"]
+          updated_at?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pages_coin_id_fkey"
+            columns: ["coin_id"]
+            isOneToOne: false
+            referencedRelation: "coins"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scores: {
+        Row: {
+          as_of: string
+          coin_id: string
+          confidence: number
+          created_at: string
+          green_flags: Json | null
+          id: string
+          overall: number
+          overall_cap: number | null
+          penalties: number | null
+          pillars: Json | null
+          red_flags: Json | null
+          summary: string | null
+          updated_at: string
+        }
+        Insert: {
+          as_of?: string
+          coin_id: string
+          confidence?: number
+          created_at?: string
+          green_flags?: Json | null
+          id?: string
+          overall: number
+          overall_cap?: number | null
+          penalties?: number | null
+          pillars?: Json | null
+          red_flags?: Json | null
+          summary?: string | null
+          updated_at?: string
+        }
+        Update: {
+          as_of?: string
+          coin_id?: string
+          confidence?: number
+          created_at?: string
+          green_flags?: Json | null
+          id?: string
+          overall?: number
+          overall_cap?: number | null
+          penalties?: number | null
+          pillars?: Json | null
+          red_flags?: Json | null
+          summary?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scores_coin_id_fkey"
+            columns: ["coin_id"]
+            isOneToOne: false
+            referencedRelation: "coins"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      settings: {
+        Row: {
+          allow_domains: string[] | null
+          created_at: string
+          hybrid_mode: boolean
+          id: number
+          strategy_version: string
+          updated_at: string
+          weights_json: Json
+        }
+        Insert: {
+          allow_domains?: string[] | null
+          created_at?: string
+          hybrid_mode?: boolean
+          id?: number
+          strategy_version?: string
+          updated_at?: string
+          weights_json?: Json
+        }
+        Update: {
+          allow_domains?: string[] | null
+          created_at?: string
+          hybrid_mode?: boolean
+          id?: number
+          strategy_version?: string
+          updated_at?: string
+          weights_json?: Json
+        }
+        Relationships: []
+      }
       trades: {
         Row: {
           ai_research_summary: string | null
@@ -195,7 +405,13 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      coin_status:
+        | "pending"
+        | "processing"
+        | "analyzed"
+        | "failed"
+        | "insufficient_data"
+      page_status: "pending" | "fetched" | "failed" | "empty"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -322,6 +538,15 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      coin_status: [
+        "pending",
+        "processing",
+        "analyzed",
+        "failed",
+        "insufficient_data",
+      ],
+      page_status: ["pending", "fetched", "failed", "empty"],
+    },
   },
 } as const
