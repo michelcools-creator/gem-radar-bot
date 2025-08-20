@@ -12,6 +12,17 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 );
 
+// Web-Only scoring weights as specified
+const DEFAULT_SCORING_WEIGHTS = {
+  security_rug_pull: 15,    // Based on claims on site/audit links (not verified)
+  tokenomics: 10,           // Only what's publicly described (supply/vesting in docs)
+  team_transparency: 20,    // Doxxed team, bios, LinkedIn/track record on site
+  product_roadmap: 20,     // Demo/MVP, documentation quality, milestones with dates
+  onchain_traction: 10,    // Qualitative: partners/integrations mentioned publicly
+  market_narrative: 15,    // Clear positioning vs comparable projects
+  community: 10           // Engagement from publicly visible channels
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -432,72 +443,308 @@ function calculateCoinScore(facts: any, weights: Record<string, number>) {
   const red_flags: string[] = [];
   const green_flags: string[] = [];
   
-  // Security & Rug-Pull (15 points)
-  let securityScore = 5; // base
-  if (facts.security?.audit_links?.length > 0) {
-    securityScore += 5;
-    green_flags.push('Has audit links');
+  // Web-Only Scoring with exact weights specified
+  const w = weights || DEFAULT_SCORING_WEIGHTS;
+  
+  // Security & Rug-Pull Detection (15%) - based on claims/audit links
+  let securityScore = calculateSecurityScore(facts);
+  pillars.security_rug_pull = (securityScore / 100) * w.security_rug_pull;
+  
+  // Tokenomics (10%) - public supply/vesting info
+  let tokenomicsScore = calculateTokenomicsScore(facts);
+  pillars.tokenomics = (tokenomicsScore / 100) * w.tokenomics;
+  
+  // Team & Transparency (20%) - doxxed team, bios, LinkedIn
+  let teamScore = calculateTeamScore(facts);
+  pillars.team_transparency = (teamScore / 100) * w.team_transparency;
+  
+  // Product & Roadmap (20%) - demo/MVP, documentation quality
+  let productScore = calculateProductScore(facts);
+  pillars.product_roadmap = (productScore / 100) * w.product_roadmap;
+  
+  // On-chain Traction (10%) - partners/integrations mentioned publicly
+  let tractionScore = calculateTractionScore(facts);
+  pillars.onchain_traction = (tractionScore / 100) * w.onchain_traction;
+  
+  // Market/Narrative Fit (15%) - positioning vs competitors
+  let marketScore = calculateMarketScore(facts);
+  pillars.market_narrative = (marketScore / 100) * w.market_narrative;
+  
+  // Community (10%) - engagement from publicly visible channels
+  let communityScore = calculateCommunityScore(facts);
+  pillars.community = (communityScore / 100) * w.community;
+  
+  // Apply hard caps and penalties as specified
+  if (facts.security?.risky_language?.some((lang: string) => 
+    lang.toLowerCase().includes("guaranteed returns") || 
+    lang.toLowerCase().includes("guaranteed profit"))) {
+    penalties += 15;
+    red_flags.push("Guaranteed return promises detected (-15 points)");
   }
-  if (facts.security?.risky_language?.length > 0) {
+  
+  if (facts.security?.risky_language?.some((lang: string) => 
+    lang.toLowerCase().includes("misleading") || 
+    lang.toLowerCase().includes("false claim"))) {
     penalties += 10;
-    red_flags.push('Contains risky language');
+    red_flags.push("Misleading information detected (-10 points)");
   }
-  pillars.security_rug_pull = Math.min(securityScore, weights.security_rug_pull);
   
-  // Team & Transparency (20 points)  
-  let teamScore = 2; // base
-  if (facts.team?.doxxed === true) {
-    teamScore += 15;
-    green_flags.push('Doxxed team');
-  } else if (facts.team?.doxxed === false) {
-    teamScore += 5;
+  if (facts.security?.audit_links?.length === 0 && 
+      facts.security?.owner_controls?.includes("audit claim")) {
+    penalties += 3;
+    red_flags.push("Audit claim without source (-3 points)");
   }
-  if (facts.team?.members?.length > 2) {
-    teamScore += 3;
-    green_flags.push('Multiple team members listed');
-  }
-  pillars.team_transparency = Math.min(teamScore, weights.team_transparency);
   
-  // Product & Roadmap (20 points)
-  let productScore = 2; // base
-  if (facts.product?.mvp === 'yes') {
-    productScore += 10;
-    green_flags.push('Has MVP');
-  }
-  if (facts.product?.roadmap_items?.length > 2) {
-    productScore += 8;
-    green_flags.push('Detailed roadmap');
-  }
-  pillars.product_roadmap = Math.min(productScore, weights.product_roadmap);
-  
-  // Other pillars with basic scoring
-  pillars.tokenomics = Math.min(facts.tokenomics?.supply ? 8 : 3, weights.tokenomics);
-  pillars.onchain_traction = Math.min(5, weights.onchain_traction); // web-only limitation
-  pillars.market_narrative = Math.min(facts.market?.narrative ? 12 : 5, weights.market_narrative);
-  pillars.community = Math.min(facts.community?.channels?.length > 1 ? 8 : 3, weights.community);
+  // Green flags
+  if (facts.team?.doxxed === true) green_flags.push("Team is doxxed");
+  if (facts.security?.audit_links?.length > 0) green_flags.push("Security audits found");
+  if (facts.product?.mvp === "yes") green_flags.push("MVP/Demo available");
+  if (facts.tokenomics?.supply && facts.tokenomics.supply !== "unknown") green_flags.push("Tokenomics documented");
+  if (facts.community?.channels?.length > 2) green_flags.push("Active on multiple channels");
   
   const overall = Object.values(pillars).reduce((sum, score) => sum + score, 0);
-  const overall_cap = Math.max(overall - penalties, 0);
+  let finalScore = Math.max(overall - penalties, 0);
   
-  // Calculate confidence based on data availability
-  const dataPoints = [
-    facts.team?.doxxed !== 'unknown',
-    facts.tokenomics?.supply,
-    facts.product?.mvp !== 'unknown',
-    facts.security?.audit_links?.length > 0,
-    facts.market?.narrative,
-    facts.community?.channels?.length > 0
-  ];
-  const confidence = dataPoints.filter(Boolean).length / dataPoints.length;
+  // Hard cap for misleading information
+  if (facts.security?.risky_language?.some((lang: string) => lang.toLowerCase().includes("misleading"))) {
+    finalScore = Math.min(20, finalScore);
+    red_flags.push("Score capped at 20 due to misleading information");
+  }
+  
+  // Calculate confidence based on data coverage and freshness
+  const expectedFields = ['team', 'tokenomics', 'security', 'product', 'market', 'community'];
+  const coverageRatio = expectedFields.filter(field => 
+    facts[field] && facts[field] !== "unknown" && 
+    Object.keys(facts[field]).length > 0
+  ).length / expectedFields.length;
+  
+  const confidence = Math.min(1, coverageRatio);
   
   return {
-    overall: overall_cap,
-    overall_cap: overall_cap < overall ? overall_cap : null,
+    overall: Math.round(Math.min(100, Math.max(0, finalScore))),
+    overall_cap: finalScore > 100 ? 100 : null,
     confidence: Math.round(confidence * 100) / 100,
     pillars,
     penalties,
     red_flags,
     green_flags,
-    summary: `Score: ${overall_cap}/100 (${Math.round(confidence * 100)}% confidence)`
+    summary: `Score: ${Math.round(finalScore)}/100 (${Math.round(confidence * 100)}% confidence)`
   };
+}
+
+// Individual scoring functions for Web-Only methodology
+
+function calculateSecurityScore(facts: any): number {
+  if (!facts.security) return 0;
+  
+  let score = 10; // base score
+  
+  // Audit links (major factor)
+  if (facts.security.audit_links && facts.security.audit_links.length > 0) {
+    score += 60; // Strong positive for actual audit links
+  }
+  
+  // Owner controls assessment
+  if (facts.security.owner_controls && facts.security.owner_controls !== "unknown") {
+    if (facts.security.owner_controls.toLowerCase().includes("limited") || 
+        facts.security.owner_controls.toLowerCase().includes("renounced")) {
+      score += 20;
+    } else if (facts.security.owner_controls.toLowerCase().includes("unlimited") ||
+               facts.security.owner_controls.toLowerCase().includes("full control")) {
+      score -= 10;
+    }
+  }
+  
+  // Deduct for risky language
+  if (facts.security.risky_language && facts.security.risky_language.length > 0) {
+    score -= facts.security.risky_language.length * 15; // Heavy penalty
+  }
+  
+  // Proof URLs quality
+  if (facts.security.proof_urls && facts.security.proof_urls.length > 1) {
+    score += 10; // Multiple sources
+  }
+  
+  return Math.min(100, Math.max(0, score));
+}
+
+function calculateTokenomicsScore(facts: any): number {
+  if (!facts.tokenomics) return 0;
+  
+  let score = 5; // base score
+  
+  // Supply information
+  if (facts.tokenomics.supply && facts.tokenomics.supply !== "unknown") {
+    score += 30;
+    
+    // Bonus for clear supply cap
+    if (facts.tokenomics.supply.toLowerCase().includes("cap") ||
+        facts.tokenomics.supply.toLowerCase().includes("fixed") ||
+        facts.tokenomics.supply.toLowerCase().includes("limited")) {
+      score += 15;
+    }
+  }
+  
+  // Vesting information
+  if (facts.tokenomics.vesting && facts.tokenomics.vesting !== "unknown") {
+    score += 25;
+    
+    // Bonus for transparent vesting schedule
+    if (facts.tokenomics.vesting.toLowerCase().includes("schedule") ||
+        facts.tokenomics.vesting.toLowerCase().includes("timeline")) {
+      score += 10;
+    }
+  }
+  
+  // Utility description
+  if (facts.tokenomics.utility && facts.tokenomics.utility !== "unknown") {
+    score += 20;
+  }
+  
+  // Proof URLs
+  if (facts.tokenomics.proof_urls && facts.tokenomics.proof_urls.length > 0) {
+    score += 10;
+  }
+  
+  return Math.min(100, score);
+}
+
+function calculateTeamScore(facts: any): number {
+  if (!facts.team) return 0;
+  
+  let score = 0;
+  
+  // Doxxed team (major factor)
+  if (facts.team.doxxed === true) {
+    score += 50;
+  } else if (facts.team.doxxed === false) {
+    score += 15; // Some team info but not doxxed
+  }
+  
+  // Team members with proof
+  if (facts.team.members && facts.team.members.length > 0) {
+    const membersWithProof = facts.team.members.filter((m: any) => m.proof_url);
+    score += Math.min(30, membersWithProof.length * 10);
+    
+    // Bonus for LinkedIn/professional backgrounds
+    const professionalMembers = facts.team.members.filter((m: any) => 
+      m.role && (m.role.toLowerCase().includes("linkedin") || 
+                 m.role.toLowerCase().includes("ceo") ||
+                 m.role.toLowerCase().includes("cto") ||
+                 m.role.toLowerCase().includes("founder")));
+    score += Math.min(20, professionalMembers.length * 7);
+  }
+  
+  return Math.min(100, score);
+}
+
+function calculateProductScore(facts: any): number {
+  if (!facts.product) return 0;
+  
+  let score = 0;
+  
+  // MVP/Demo availability (major factor)
+  if (facts.product.mvp === "yes") {
+    score += 60;
+  } else if (facts.product.mvp === "no") {
+    score += 10; // Some product info but no demo
+  }
+  
+  // Roadmap quality with dates
+  if (facts.product.roadmap_items && facts.product.roadmap_items.length > 0) {
+    const itemsWithDates = facts.product.roadmap_items.filter((item: any) => item.date);
+    score += Math.min(25, itemsWithDates.length * 8);
+    
+    // Additional points for detailed milestones
+    score += Math.min(15, facts.product.roadmap_items.length * 3);
+  }
+  
+  return Math.min(100, score);
+}
+
+function calculateTractionScore(facts: any): number {
+  if (!facts.market) return 10; // Web-only limitation - base score
+  
+  let score = 10;
+  
+  // Partners/integrations mentioned
+  if (facts.market.narrative && facts.market.narrative !== "unknown") {
+    if (facts.market.narrative.toLowerCase().includes("partner") ||
+        facts.market.narrative.toLowerCase().includes("integration") ||
+        facts.market.narrative.toLowerCase().includes("collaboration")) {
+      score += 40;
+    }
+  }
+  
+  // Competitors analysis (shows market understanding)
+  if (facts.market.competitors && facts.market.competitors.length > 0) {
+    score += Math.min(30, facts.market.competitors.length * 10);
+  }
+  
+  // Proof URLs for traction claims
+  if (facts.market.proof_urls && facts.market.proof_urls.length > 0) {
+    score += 20;
+  }
+  
+  return Math.min(100, score);
+}
+
+function calculateMarketScore(facts: any): number {
+  if (!facts.market) return 0;
+  
+  let score = 5; // base score
+  
+  // Clear narrative/positioning
+  if (facts.market.narrative && facts.market.narrative !== "unknown") {
+    score += 40;
+    
+    // Bonus for clear differentiation
+    if (facts.market.narrative.toLowerCase().includes("unique") ||
+        facts.market.narrative.toLowerCase().includes("different") ||
+        facts.market.narrative.toLowerCase().includes("innovative")) {
+      score += 20;
+    }
+  }
+  
+  // Competitor analysis
+  if (facts.market.competitors && facts.market.competitors.length > 0) {
+    score += 25; // Shows market awareness
+  }
+  
+  // Proof URLs for market claims
+  if (facts.market.proof_urls && facts.market.proof_urls.length > 0) {
+    score += 10;
+  }
+  
+  return Math.min(100, score);
+}
+
+function calculateCommunityScore(facts: any): number {
+  if (!facts.community) return 0;
+  
+  let score = 0;
+  
+  // Number of official channels
+  if (facts.community.channels && facts.community.channels.length > 0) {
+    score += Math.min(50, facts.community.channels.length * 15);
+  }
+  
+  // Notable engagement mentioned
+  if (facts.community.notable_engagement && facts.community.notable_engagement !== "unknown") {
+    score += 30;
+    
+    // Bonus for specific engagement metrics
+    if (facts.community.notable_engagement.toLowerCase().includes("active") ||
+        facts.community.notable_engagement.toLowerCase().includes("growing") ||
+        facts.community.notable_engagement.toLowerCase().includes("engaged")) {
+      score += 10;
+    }
+  }
+  
+  // Proof URLs for engagement claims
+  if (facts.community.proof_urls && facts.community.proof_urls.length > 0) {
+    score += 10;
+  }
+  
+  return Math.min(100, score);
 }

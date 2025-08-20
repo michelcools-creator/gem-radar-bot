@@ -106,9 +106,12 @@ const Dashboard = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Crypto Gem Radar</h1>
+          <h1 className="text-3xl font-bold mb-2">New-Coin Radar (Web-Only)</h1>
+          <p className="text-sm text-muted-foreground mb-2">
+            🔬 Research tool only - not investment advice. Respects robots.txt and rate limits.
+          </p>
           <p className="text-muted-foreground">
-            Research tool for analyzing new cryptocurrency projects
+            Analyzes new cryptocurrency projects using Web-Only scoring methodology
           </p>
         </div>
         <div className="flex gap-3">

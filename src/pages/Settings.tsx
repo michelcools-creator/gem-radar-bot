@@ -80,10 +80,10 @@ const Settings = () => {
     const numValue = parseInt(value) || 0;
     setFormData(prev => ({
       ...prev,
-      weights_json: {
-        ...prev.weights_json,
-        [pillar]: numValue
-      }
+        weights_json: {
+          ...prev.weights_json,
+          [pillar]: numValue
+        }
     }));
   };
 
@@ -138,6 +138,11 @@ const Settings = () => {
             <p className="text-sm text-muted-foreground">
               Total should equal 100. Current total: {totalWeight}
             </p>
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg mt-2">
+              <p className="text-sm text-blue-800">
+                ⚠️ Research tool only - not investment advice. Respects robots.txt and rate limits.
+              </p>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
