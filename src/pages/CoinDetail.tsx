@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ArrowLeft, ExternalLink, Users, Shield, Rocket, TrendingUp, MessageCircle, Coins } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import Navigation from '@/components/Navigation';
+import LoadingSpinner from '@/components/LoadingSpinner';
 
 const CoinDetail = () => {
   const { id } = useParams();
@@ -33,22 +35,29 @@ const CoinDetail = () => {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
-      </div>
+      <>
+        <Navigation />
+        <div className="flex items-center justify-center min-h-[80vh] flex-col gap-4">
+          <LoadingSpinner size="lg" />
+          <p className="text-muted-foreground">Loading coin details...</p>
+        </div>
+      </>
     );
   }
 
   if (!coinData) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Coin not found</h1>
-          <Link to="/">
-            <Button>Back to Dashboard</Button>
-          </Link>
+      <>
+        <Navigation />
+        <div className="container mx-auto px-4 py-8">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold mb-4">Coin not found</h1>
+            <Link to="/">
+              <Button>Back to Dashboard</Button>
+            </Link>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -75,7 +84,10 @@ const CoinDetail = () => {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl">
+    <div className="min-h-screen bg-background">
+      <Navigation />
+      
+      <div className="container mx-auto px-4 py-8 max-w-6xl">
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
         <Link to="/">
@@ -335,6 +347,7 @@ const CoinDetail = () => {
           )}
 
         </div>
+      </div>
       </div>
     </div>
   );

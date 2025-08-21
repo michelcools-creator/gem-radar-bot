@@ -4,11 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { AlertCircle, TrendingUp, RefreshCw, Settings, ExternalLink } from 'lucide-react';
+import { AlertCircle, TrendingUp, RefreshCw, ExternalLink } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Link } from 'react-router-dom';
+import Navigation from '@/components/Navigation';
+import LoadingSpinner from '@/components/LoadingSpinner';
 
 interface Coin {
   id: string;
@@ -92,9 +94,12 @@ const Dashboard = () => {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <RefreshCw className="w-8 h-8 animate-spin" />
-      </div>
+      <>
+        <Navigation />
+        <div className="flex items-center justify-center min-h-[80vh]">
+          <LoadingSpinner size="lg" />
+        </div>
+      </>
     );
   }
 
@@ -102,7 +107,10 @@ const Dashboard = () => {
   const highScoreCoins = analyzedCoins.filter(coin => coin.scores?.[0]?.overall >= 70);
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="min-h-screen bg-background">
+      <Navigation />
+      
+      <div className="container mx-auto px-4 py-8">
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
@@ -130,21 +138,12 @@ const Dashboard = () => {
             className="border-primary/20 hover:border-primary/40 hover:bg-primary/5"
           >
             {isRunning ? (
-              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+              <LoadingSpinner size="sm" className="mr-2" />
             ) : (
               <TrendingUp className="w-4 h-4 mr-2" />
             )}
             {isRunning ? 'Running...' : 'Run Analysis'}
           </Button>
-          <Link to="/settings">
-            <Button 
-              variant="ghost"
-              className="hover:bg-primary/5 hover:text-primary"
-            >
-              <Settings className="w-4 h-4 mr-2" />
-              Settings
-            </Button>
-          </Link>
         </div>
       </div>
 
@@ -319,6 +318,7 @@ const Dashboard = () => {
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 };

@@ -10,6 +10,8 @@ import { ArrowLeft, Save, RefreshCw } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
 import { Link } from 'react-router-dom';
+import Navigation from '@/components/Navigation';
+import LoadingSpinner from '@/components/LoadingSpinner';
 
 const Settings = () => {
   const { toast } = useToast();
@@ -102,9 +104,13 @@ const Settings = () => {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <RefreshCw className="w-8 h-8 animate-spin" />
-      </div>
+      <>
+        <Navigation />
+        <div className="flex items-center justify-center min-h-[80vh] flex-col gap-4">
+          <LoadingSpinner size="lg" />
+          <p className="text-muted-foreground">Loading settings...</p>
+        </div>
+      </>
     );
   }
 
@@ -112,7 +118,10 @@ const Settings = () => {
   const totalWeight = Object.values(weights).reduce((sum, val) => sum + val, 0);
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-4xl">
+    <div className="min-h-screen bg-background">
+      <Navigation />
+      
+      <div className="container mx-auto px-4 py-8 max-w-4xl">
       <div className="flex items-center gap-4 mb-6">
         <Link to="/">
           <Button variant="ghost" size="sm">
@@ -345,6 +354,7 @@ const Settings = () => {
         </div>
 
       </form>
+      </div>
     </div>
   );
 };
