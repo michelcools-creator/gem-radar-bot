@@ -75,19 +75,19 @@ const Dashboard = () => {
 
   const getStatusColor = (status: string) => {
     const colors = {
-      pending: 'bg-yellow-500',
-      processing: 'bg-blue-500',
-      analyzed: 'bg-green-500',
-      failed: 'bg-red-500',
-      insufficient_data: 'bg-gray-500'
+      pending: 'bg-warning text-warning-foreground',
+      processing: 'bg-primary text-primary-foreground animate-pulse',
+      analyzed: 'bg-success text-success-foreground',
+      failed: 'bg-destructive text-destructive-foreground',
+      insufficient_data: 'bg-muted text-muted-foreground'
     };
-    return colors[status as keyof typeof colors] || 'bg-gray-500';
+    return colors[status as keyof typeof colors] || 'bg-muted text-muted-foreground';
   };
 
   const getScoreColor = (score: number) => {
-    if (score >= 70) return 'text-green-600';
-    if (score >= 50) return 'text-yellow-600';
-    return 'text-red-600';
+    if (score >= 70) return 'text-success font-semibold';
+    if (score >= 50) return 'text-warning font-medium';
+    return 'text-destructive font-medium';
   };
 
   if (isLoading) {
@@ -106,7 +106,15 @@ const Dashboard = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold mb-2">New-Coin Radar (Web-Only)</h1>
+          <div className="flex items-center space-x-3 mb-2">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary to-primary-glow shadow-lg"></div>
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary-glow bg-clip-text text-transparent">
+                New-Coin Radar
+              </h1>
+              <p className="text-sm text-muted-foreground">Web-Only Research Tool</p>
+            </div>
+          </div>
           <p className="text-sm text-muted-foreground mb-2">
             🔬 Research tool only - not investment advice. Respects robots.txt and rate limits.
           </p>
@@ -119,16 +127,20 @@ const Dashboard = () => {
             variant="outline"
             onClick={() => runPipeline.mutate()}
             disabled={isRunning}
+            className="border-primary/20 hover:border-primary/40 hover:bg-primary/5"
           >
             {isRunning ? (
-              <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
             ) : (
-              <RefreshCw className="w-4 h-4 mr-2" />
+              <TrendingUp className="w-4 h-4 mr-2" />
             )}
-            Run Analysis
+            {isRunning ? 'Running...' : 'Run Analysis'}
           </Button>
           <Link to="/settings">
-            <Button variant="outline">
+            <Button 
+              variant="ghost"
+              className="hover:bg-primary/5 hover:text-primary"
+            >
               <Settings className="w-4 h-4 mr-2" />
               Settings
             </Button>
@@ -137,8 +149,8 @@ const Dashboard = () => {
       </div>
 
       {/* Disclaimer */}
-      <Alert className="mb-6">
-        <AlertCircle className="h-4 w-4" />
+      <Alert className="mb-6 border-warning/20 bg-warning/5">
+        <AlertCircle className="h-4 w-4 text-warning" />
         <AlertDescription>
           <strong>Research Only:</strong> This tool provides research insights based on web content analysis. 
           Not investment advice. Always do your own research before making investment decisions.
@@ -147,7 +159,7 @@ const Dashboard = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <Card>
+        <Card className="border-primary/20 bg-gradient-to-br from-card to-primary/5">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Total Coins</CardTitle>
           </CardHeader>
@@ -156,30 +168,30 @@ const Dashboard = () => {
           </CardContent>
         </Card>
         
-        <Card>
+        <Card className="border-success/20 bg-gradient-to-br from-card to-success/5">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Analyzed</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{analyzedCoins.length}</div>
+            <div className="text-2xl font-bold text-success">{analyzedCoins.length}</div>
           </CardContent>
         </Card>
         
-        <Card>
+        <Card className="border-success/20 bg-gradient-to-br from-card to-success/10">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">High Score (≥70)</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{highScoreCoins.length}</div>
+            <div className="text-2xl font-bold text-success">{highScoreCoins.length}</div>
           </CardContent>
         </Card>
         
-        <Card>
+        <Card className="border-warning/20 bg-gradient-to-br from-card to-warning/5">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Processing</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-2xl font-bold text-warning">
               {coins?.filter(coin => coin.status === 'processing').length || 0}
             </div>
           </CardContent>
@@ -187,10 +199,10 @@ const Dashboard = () => {
       </div>
 
       {/* Coins Table */}
-      <Card>
-        <CardHeader>
+      <Card className="shadow-lg border-primary/10">
+        <CardHeader className="bg-gradient-to-r from-primary/5 to-primary-glow/5">
           <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="w-5 h-5" />
+            <TrendingUp className="w-5 h-5 text-primary" />
             Recent Coin Analysis
           </CardTitle>
         </CardHeader>
@@ -198,15 +210,15 @@ const Dashboard = () => {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b">
-                  <th className="text-left py-3 px-4">Coin</th>
-                  <th className="text-left py-3 px-4">Score</th>
-                  <th className="text-left py-3 px-4">Confidence</th>
-                  <th className="text-left py-3 px-4">Pillars</th>
-                  <th className="text-left py-3 px-4">Flags</th>
-                  <th className="text-left py-3 px-4">Status</th>
-                  <th className="text-left py-3 px-4">First Seen</th>
-                  <th className="text-left py-3 px-4">Actions</th>
+                <tr className="border-b border-primary/10">
+                  <th className="text-left py-3 px-4 font-medium">Coin</th>
+                  <th className="text-left py-3 px-4 font-medium">Score</th>
+                  <th className="text-left py-3 px-4 font-medium">Confidence</th>
+                  <th className="text-left py-3 px-4 font-medium">Pillars</th>
+                  <th className="text-left py-3 px-4 font-medium">Flags</th>
+                  <th className="text-left py-3 px-4 font-medium">Status</th>
+                  <th className="text-left py-3 px-4 font-medium">First Seen</th>
+                  <th className="text-left py-3 px-4 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -214,7 +226,7 @@ const Dashboard = () => {
                   const latestScore = coin.scores?.[0];
                   
                   return (
-                    <tr key={coin.id} className="border-b hover:bg-muted/50">
+                    <tr key={coin.id} className="border-b border-muted/30 hover:bg-primary/5 transition-colors">
                       <td className="py-3 px-4">
                         <div>
                           <div className="font-medium">{coin.name}</div>
@@ -236,7 +248,7 @@ const Dashboard = () => {
                         {latestScore ? (
                           <div className="flex items-center gap-2">
                             <Progress value={latestScore.confidence * 100} className="w-16" />
-                            <span className="text-sm">{Math.round(latestScore.confidence * 100)}%</span>
+                            <span className="text-sm font-medium">{Math.round(latestScore.confidence * 100)}%</span>
                           </div>
                         ) : (
                           <span className="text-muted-foreground">-</span>
@@ -247,7 +259,7 @@ const Dashboard = () => {
                         {latestScore?.pillars ? (
                           <div className="flex flex-wrap gap-1">
                             {Object.entries(latestScore.pillars).map(([key, value]) => (
-                              <Badge key={key} variant="outline" className="text-xs">
+                              <Badge key={key} variant="outline" className="text-xs border-primary/20">
                                 {key.split('_')[0]}: {Math.round(value as number)}
                               </Badge>
                             ))}
@@ -265,7 +277,7 @@ const Dashboard = () => {
                             </Badge>
                           ))}
                           {latestScore?.green_flags?.map((flag, i) => (
-                            <Badge key={i} variant="default" className="text-xs bg-green-100">
+                            <Badge key={i} className="text-xs bg-success text-success-foreground">
                               ✅ {flag.substring(0, 20)}...
                             </Badge>
                           ))}
@@ -286,7 +298,7 @@ const Dashboard = () => {
                       
                       <td className="py-3 px-4">
                         <Link to={`/coin/${coin.id}`}>
-                          <Button variant="ghost" size="sm">
+                          <Button variant="ghost" size="sm" className="hover:bg-primary/10">
                             <ExternalLink className="w-4 h-4" />
                           </Button>
                         </Link>
@@ -298,8 +310,10 @@ const Dashboard = () => {
             </table>
             
             {!coins?.length && (
-              <div className="text-center py-8 text-muted-foreground">
-                No coins found. Run the analysis pipeline to discover new projects.
+              <div className="text-center py-12 text-muted-foreground">
+                <TrendingUp className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                <h3 className="text-lg font-medium mb-2">No coins found</h3>
+                <p>Run the analysis pipeline to discover new projects.</p>
               </div>
             )}
           </div>

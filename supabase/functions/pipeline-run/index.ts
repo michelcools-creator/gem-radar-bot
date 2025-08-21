@@ -64,10 +64,10 @@ async function discoverRecentListings() {
   try {
     console.log('Discovering recent listings from CoinGecko...');
     
-    // Check if hybrid mode is enabled
+    // Check settings and allowed domains
     const { data: settings } = await supabase
       .from('settings')
-      .select('hybrid_mode')
+      .select('hybrid_mode, allow_domains')
       .single();
     
     if (settings?.hybrid_mode) {
@@ -76,15 +76,32 @@ async function discoverRecentListings() {
       return;
     }
     
-    // Web-only mode: scrape the new cryptocurrencies page
+    // Check if coingecko.com is in allowed domains
+    const allowedDomains = settings?.allow_domains || ['coingecko.com'];
+    if (!allowedDomains.includes('coingecko.com')) {
+      console.log('CoinGecko not in allowed domains, skipping discovery');
+      return;
+    }
+    
+    // Rate limiting: wait between requests
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Web-only mode: scrape the new cryptocurrencies page with proper compliance
     const response = await fetch('https://www.coingecko.com/en/new-cryptocurrencies', {
       headers: {
-        'User-Agent': 'NewCoinRadarResearchBot/1.0 (research purposes)',
+        'User-Agent': 'NewCoinRadarResearchBot/1.0 (contact: research@newcoinradar.dev)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'close',
       },
     });
     
     if (!response.ok) {
+      if (response.status === 429) {
+        console.log('Rate limited, implementing exponential backoff');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        throw new Error(`Rate limited: ${response.status}`);
+      }
       throw new Error(`Failed to fetch CoinGecko listings: ${response.status}`);
     }
     
