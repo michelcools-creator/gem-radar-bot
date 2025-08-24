@@ -1,6 +1,6 @@
 import React from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,9 +10,11 @@ import { supabase } from '@/integrations/supabase/client';
 import Navigation from '@/components/Navigation';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ScoreHistoryChart from '@/components/ScoreHistoryChart';
+import AnalysisPipelineFlow from '@/components/AnalysisPipelineFlow';
 
 const CoinDetail = () => {
   const { id } = useParams();
+  const queryClient = useQueryClient();
   
   const { data: coinData, isLoading } = useQuery({
     queryKey: ['coin', id],
@@ -31,8 +33,19 @@ const CoinDetail = () => {
       if (error) throw error;
       return data;
     },
-    enabled: !!id
+    enabled: !!id,
   });
+
+  // Use a separate useEffect for auto-refresh when status is processing
+  React.useEffect(() => {
+    if (coinData?.status === 'processing') {
+      const interval = setInterval(() => {
+        queryClient.invalidateQueries({ queryKey: ['coin', id] });
+      }, 3000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [coinData?.status, queryClient, id]);
 
   if (isLoading) {
     return (
@@ -119,6 +132,21 @@ const CoinDetail = () => {
           </div>
         )}
       </div>
+
+      {/* Analysis Pipeline Flow */}
+      {coinData.status !== 'analyzed' && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Analysis Pipeline Progress</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Real-time view of where your coin is in the analysis process
+            </p>
+          </CardHeader>
+          <CardContent>
+            <AnalysisPipelineFlow coinData={coinData} />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column - Score Details */}
