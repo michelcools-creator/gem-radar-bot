@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Settings, BarChart3, Coins } from "lucide-react";
+import { Settings, BarChart3, Coins, Shield } from "lucide-react";
 
 const Navigation = () => {
   const location = useLocation();
@@ -38,6 +38,17 @@ const Navigation = () => {
               >
                 <Settings className="w-4 h-4" />
                 Settings
+              </Button>
+            </Link>
+            
+            <Link to="/admin">
+              <Button 
+                variant={isActive("/admin") ? "default" : "ghost"} 
+                size="sm"
+                className="flex items-center gap-2"
+              >
+                <Shield className="w-4 h-4" />
+                Admin
               </Button>
             </Link>
           </div>

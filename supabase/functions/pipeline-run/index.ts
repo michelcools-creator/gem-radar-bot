@@ -243,36 +243,66 @@ async function fetchPages() {
     for (const [type, url] of Object.entries(links)) {
       if (!url || !isAllowedDomain(url, allowedDomains)) continue;
       
-      try {
-        const response = await fetch(url, {
-          headers: {
-            'User-Agent': 'NewCoinRadarResearchBot/1.0 (research purposes)',
-          },
-        });
-        
-        if (response.ok) {
-          const html = await response.text();
-          const cleanText = extractCleanText(html);
-          const excerpt = cleanText.substring(0, 1000);
+      let attempt = 0;
+      const maxAttempts = 3;
+      
+      while (attempt < maxAttempts) {
+        try {
+          const response = await fetch(url, {
+            headers: {
+              'User-Agent': 'NewCoinRadarResearchBot/1.0 (research purposes)',
+            },
+          });
           
-          await supabase
-            .from('pages')
-            .upsert({
-              coin_id: coin.id,
-              url,
-              status: 'fetched',
-              http_status: response.status,
-              content_text: cleanText.substring(0, 200000), // 200KB limit
-              content_excerpt: excerpt,
-              fetched_at: new Date().toISOString()
-            });
+          if (response.ok) {
+            const html = await response.text();
+            
+            // Use improved text extraction with readability-like approach
+            const cleanText = extractCleanTextImproved(html);
+            const excerpt = cleanText.substring(0, 1000);
+            
+            await supabase
+              .from('pages')
+              .upsert({
+                coin_id: coin.id,
+                url,
+                status: 'fetched',
+                http_status: response.status,
+                content_text: cleanText.substring(0, 200000), // 200KB limit
+                content_excerpt: excerpt,
+                fetched_at: new Date().toISOString()
+              });
+              
+            break; // Success, exit retry loop
+          } else if (response.status === 429 || response.status >= 500) {
+            // Exponential backoff for rate limits and server errors
+            attempt++;
+            if (attempt < maxAttempts) {
+              const waitTime = Math.pow(2, attempt) * 1000 + Math.random() * 1000; // 2^n seconds + jitter
+              console.log(`HTTP ${response.status}, attempt ${attempt}/${maxAttempts}, waiting ${Math.round(waitTime/1000)}s`);
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+            } else {
+              console.error(`Failed to fetch ${url} after ${maxAttempts} attempts: ${response.status}`);
+            }
+          } else {
+            // Other errors, don't retry
+            console.error(`HTTP error for ${url}: ${response.status}`);
+            break;
+          }
+        } catch (error) {
+          attempt++;
+          if (attempt < maxAttempts) {
+            const waitTime = Math.pow(2, attempt) * 1000;
+            console.log(`Fetch error for ${url}, attempt ${attempt}/${maxAttempts}, waiting ${Math.round(waitTime/1000)}s`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          } else {
+            console.error(`Error fetching page ${url}:`, error);
+          }
         }
-        
-        // Rate limiting
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } catch (error) {
-        console.error(`Error fetching page ${url}:`, error);
       }
+      
+      // Rate limiting between requests
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 }
@@ -286,22 +316,47 @@ function isAllowedDomain(url: string, allowedDomains: string[]): boolean {
   }
 }
 
-function extractCleanText(html: string): string {
-  // Remove scripts, styles, and navigation
+function extractCleanTextImproved(html: string): string {
+  // Enhanced text extraction using readability-like approach
+  // Remove scripts, styles, navigation, and other non-content elements
   let cleaned = html
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<nav[\s\S]*?<\/nav>/gi, '')
     .replace(/<header[\s\S]*?<\/header>/gi, '')
-    .replace(/<footer[\s\S]*?<\/footer>/gi, '');
+    .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+    .replace(/<aside[\s\S]*?<\/aside>/gi, '')
+    .replace(/<form[\s\S]*?<\/form>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+
+  // Extract main content areas - prioritize article, main, content areas
+  const mainContentRegex = /<(article|main|div[^>]*class="[^"]*content[^"]*")[^>]*>([\s\S]*?)<\/\1>/gi;
+  const mainMatches = cleaned.match(mainContentRegex);
   
-  // Remove HTML tags and extract text
-  cleaned = cleaned.replace(/<[^>]*>/g, ' ');
+  if (mainMatches && mainMatches.length > 0) {
+    // Use the largest content block
+    cleaned = mainMatches.reduce((a, b) => a.length > b.length ? a : b);
+  }
+
+  // Remove remaining HTML tags but preserve paragraph breaks
+  cleaned = cleaned
+    .replace(/<\/?(p|br|div)[^>]*>/gi, '\n')
+    .replace(/<h[1-6][^>]*>(.*?)<\/h[1-6]>/gi, '\n\n$1\n\n')
+    .replace(/<[^>]*>/g, ' ');
   
-  // Clean up whitespace
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  // Clean up whitespace and normalize
+  cleaned = cleaned
+    .replace(/\n\s*\n\s*\n/g, '\n\n') // Multiple newlines to double
+    .replace(/[ \t]+/g, ' ') // Multiple spaces to single
+    .replace(/\n /g, '\n') // Remove leading spaces on lines
+    .trim();
   
   return cleaned;
+}
+
+function extractCleanText(html: string): string {
+  // Fallback to basic extraction for backward compatibility
+  return extractCleanTextImproved(html);
 }
 
 async function extractFacts() {
@@ -342,10 +397,14 @@ TASK: Extract structured facts and return ONLY JSON in this exact schema:
   "product": {"mvp":"yes|no|unknown", "roadmap_items":[{"milestone":"...", "date":"..."}], "proof_urls":["..."]},
   "market": {"narrative":"...", "competitors":["..."], "proof_urls":["..."]},
   "community": {"channels":["x","discord"], "notable_engagement":"...", "proof_urls":["..."]},
+  "on_chain_traction": {"partnerships":["..."], "integrations":["..."], "contracts_verified":true|false, "proof_urls":["..."]},
+  "brand_analysis": {"similar_names":["..."], "copycat_indicators":["..."], "misleading_claims":["..."]},
   "meta": {"pages_used":[{"url":"...", "excerpt":"<=300 chars"}]}
 }
 
 CITE every claim with proof_urls and excerpts. Mark unknown as "unknown".
+Look specifically for on-chain partnerships, integrations, and verified smart contracts.
+Flag any brand copycats or misleading claims like "Official Bitcoin" or similar famous project names.
 `;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -448,6 +507,11 @@ async function calculateScores() {
         .eq('id', coin.id);
         
       console.log(`Scored ${coin.name}: ${scores.overall}`);
+      
+      // Optional Discord webhook for high-scoring coins
+      if (scores.overall >= 70 && scores.confidence >= 0.7) {
+        await sendDiscordAlert(coin, scores);
+      }
     } catch (error) {
       console.error(`Error scoring coin ${coin.id}:`, error);
     }
@@ -492,6 +556,30 @@ function calculateCoinScore(facts: any, weights: Record<string, number>) {
   pillars.community = (communityScore / 100) * w.community;
   
   // Apply hard caps and penalties as specified
+  let brandPenalty = 0;
+  
+  // Brand abuse detection
+  if (facts.brand_analysis?.copycat_indicators?.length > 0) {
+    brandPenalty += 25;
+    red_flags.push("Brand copycat indicators detected (-25 points)");
+  }
+  
+  if (facts.brand_analysis?.misleading_claims?.length > 0) {
+    brandPenalty += 30;
+    red_flags.push("Misleading brand claims detected (-30 points)");
+  }
+  
+  // Famous project name abuse detection
+  const famousNames = ['bitcoin', 'ethereum', 'binance', 'coinbase', 'uniswap', 'chainlink', 'polkadot'];
+  const coinName = coin.name?.toLowerCase() || '';
+  
+  if (famousNames.some(name => coinName.includes(name) && coinName !== name)) {
+    brandPenalty += 40;
+    red_flags.push(`Potential brand abuse of famous project name (-40 points)`);
+  }
+  
+  penalties += brandPenalty;
+  
   if (facts.security?.risky_language?.some((lang: string) => 
     lang.toLowerCase().includes("guaranteed returns") || 
     lang.toLowerCase().includes("guaranteed profit"))) {
@@ -522,10 +610,17 @@ function calculateCoinScore(facts: any, weights: Record<string, number>) {
   const overall = Object.values(pillars).reduce((sum, score) => sum + score, 0);
   let finalScore = Math.max(overall - penalties, 0);
   
-  // Hard cap for misleading information
-  if (facts.security?.risky_language?.some((lang: string) => lang.toLowerCase().includes("misleading"))) {
+  // Hard cap for misleading/contradictory information
+  const hasContradictoryInfo = facts.brand_analysis?.misleading_claims?.length > 0 || 
+                              facts.security?.risky_language?.some((lang: string) => 
+                                lang.toLowerCase().includes("misleading") || 
+                                lang.toLowerCase().includes("contradictory"));
+  
+  let overall_cap = null;
+  if (hasContradictoryInfo) {
+    overall_cap = 20;
     finalScore = Math.min(20, finalScore);
-    red_flags.push("Score capped at 20 due to misleading information");
+    red_flags.push("Score capped at 20 due to misleading/contradictory information");
   }
   
   // Calculate confidence based on data coverage and freshness
@@ -539,13 +634,13 @@ function calculateCoinScore(facts: any, weights: Record<string, number>) {
   
   return {
     overall: Math.round(Math.min(100, Math.max(0, finalScore))),
-    overall_cap: finalScore > 100 ? 100 : null,
+    overall_cap: overall_cap,
     confidence: Math.round(confidence * 100) / 100,
     pillars,
     penalties,
     red_flags,
     green_flags,
-    summary: `Score: ${Math.round(finalScore)}/100 (${Math.round(confidence * 100)}% confidence)`
+    summary: `Score: ${Math.round(finalScore)}/100 (${Math.round(confidence * 100)}% confidence)${overall_cap ? ` - CAPPED AT ${overall_cap}` : ''}`
   };
 }
 
@@ -680,27 +775,36 @@ function calculateProductScore(facts: any): number {
 }
 
 function calculateTractionScore(facts: any): number {
-  if (!facts.market) return 10; // Web-only limitation - base score
+  let score = 5; // base score
   
-  let score = 10;
-  
-  // Partners/integrations mentioned
-  if (facts.market.narrative && facts.market.narrative !== "unknown") {
-    if (facts.market.narrative.toLowerCase().includes("partner") ||
-        facts.market.narrative.toLowerCase().includes("integration") ||
-        facts.market.narrative.toLowerCase().includes("collaboration")) {
-      score += 40;
+  // On-chain traction from new dedicated field
+  if (facts.on_chain_traction) {
+    if (facts.on_chain_traction.partnerships && facts.on_chain_traction.partnerships.length > 0) {
+      score += Math.min(35, facts.on_chain_traction.partnerships.length * 12);
+    }
+    
+    if (facts.on_chain_traction.integrations && facts.on_chain_traction.integrations.length > 0) {
+      score += Math.min(30, facts.on_chain_traction.integrations.length * 10);
+    }
+    
+    if (facts.on_chain_traction.contracts_verified === true) {
+      score += 25;
+    }
+    
+    if (facts.on_chain_traction.proof_urls && facts.on_chain_traction.proof_urls.length > 0) {
+      score += 5;
     }
   }
   
-  // Competitors analysis (shows market understanding)
-  if (facts.market.competitors && facts.market.competitors.length > 0) {
-    score += Math.min(30, facts.market.competitors.length * 10);
-  }
-  
-  // Proof URLs for traction claims
-  if (facts.market.proof_urls && facts.market.proof_urls.length > 0) {
-    score += 20;
+  // Fallback to market field for legacy compatibility
+  if (!facts.on_chain_traction && facts.market) {
+    if (facts.market.narrative && facts.market.narrative !== "unknown") {
+      if (facts.market.narrative.toLowerCase().includes("partner") ||
+          facts.market.narrative.toLowerCase().includes("integration") ||
+          facts.market.narrative.toLowerCase().includes("collaboration")) {
+        score += 30;
+      }
+    }
   }
   
   return Math.min(100, score);
@@ -764,4 +868,55 @@ function calculateCommunityScore(facts: any): number {
   }
   
   return Math.min(100, score);
+}
+
+async function sendDiscordAlert(coin: any, scores: any) {
+  try {
+    const discordWebhook = Deno.env.get('DISCORD_WEBHOOK_URL');
+    if (!discordWebhook) {
+      console.log('Discord webhook not configured, skipping alert');
+      return;
+    }
+    
+    const embed = {
+      title: `🚨 High-Score Coin Alert: ${coin.name} (${coin.symbol})`,
+      description: `New cryptocurrency detected with high potential score!`,
+      color: 0x00ff00, // Green color
+      fields: [
+        {
+          name: "Overall Score",
+          value: `${scores.overall}/100`,
+          inline: true
+        },
+        {
+          name: "Confidence",
+          value: `${Math.round(scores.confidence * 100)}%`,
+          inline: true
+        },
+        {
+          name: "Summary",
+          value: scores.summary || "No summary available",
+          inline: false
+        }
+      ],
+      footer: {
+        text: "NewCoin Radar Analysis System"
+      },
+      timestamp: new Date().toISOString()
+    };
+    
+    await fetch(discordWebhook, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        embeds: [embed]
+      })
+    });
+    
+    console.log(`Discord alert sent for ${coin.name}`);
+  } catch (error) {
+    console.error('Error sending Discord alert:', error);
+  }
 }
