@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
+import { JSDOM } from "https://esm.sh/jsdom@24.0.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -317,7 +318,75 @@ function isAllowedDomain(url: string, allowedDomains: string[]): boolean {
 }
 
 function extractCleanTextImproved(html: string): string {
-  // Enhanced text extraction using readability-like approach
+  try {
+    // Use JSDOM for better HTML parsing similar to Readability
+    const dom = new JSDOM(html);
+    const document = dom.window.document;
+
+    // Remove unwanted elements
+    const unwantedSelectors = [
+      'script', 'style', 'nav', 'header', 'footer', 'aside', 
+      'form', '.sidebar', '.navigation', '.menu', '.ad', '.advertisement',
+      '.social', '.share', '.comment', '.cookie', '.popup', '.modal'
+    ];
+    
+    unwantedSelectors.forEach(selector => {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach(el => el.remove());
+    });
+
+    // Prioritize main content areas
+    let contentElement = null;
+    
+    // Try to find main content in order of preference
+    const contentSelectors = [
+      'article', 'main', '[role="main"]', '.content', '.post-content', 
+      '.entry-content', '.article-content', '.page-content', '#content',
+      '.container .row', 'body'
+    ];
+    
+    for (const selector of contentSelectors) {
+      contentElement = document.querySelector(selector);
+      if (contentElement && contentElement.textContent && contentElement.textContent.trim().length > 500) {
+        break;
+      }
+    }
+    
+    if (!contentElement) {
+      contentElement = document.body || document.documentElement;
+    }
+
+    // Extract and clean text
+    let text = contentElement.textContent || '';
+    
+    // Clean up whitespace and formatting
+    text = text
+      .replace(/\s+/g, ' ')  // Multiple whitespace to single space
+      .replace(/\n\s*\n/g, '\n\n')  // Multiple newlines to double
+      .replace(/[^\S\n]+/g, ' ')  // Multiple non-newline whitespace to single space
+      .trim();
+    
+    // Remove very short lines that are likely navigation or metadata
+    const lines = text.split('\n');
+    const meaningfulLines = lines.filter(line => {
+      const trimmed = line.trim();
+      return trimmed.length > 20 && 
+             !trimmed.match(/^(home|about|contact|login|register|search|menu)$/i) &&
+             !trimmed.match(/^\d+$/) && // Just numbers
+             !trimmed.match(/^[^a-zA-Z]*$/); // No letters
+    });
+    
+    return meaningfulLines.join('\n').substring(0, 200000); // 200KB limit
+    
+  } catch (error) {
+    console.log('JSDOM parsing failed, falling back to regex:', error.message);
+    // Fallback to regex-based parsing
+    return extractCleanTextFallback(html);
+  }
+}
+
+function extractCleanTextFallback(html: string): string {
+  // Enhanced text extraction using readability-like approach (fallback)
   // Remove scripts, styles, navigation, and other non-content elements
   let cleaned = html
     .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -351,12 +420,7 @@ function extractCleanTextImproved(html: string): string {
     .replace(/\n /g, '\n') // Remove leading spaces on lines
     .trim();
   
-  return cleaned;
-}
-
-function extractCleanText(html: string): string {
-  // Fallback to basic extraction for backward compatibility
-  return extractCleanTextImproved(html);
+  return cleaned.substring(0, 200000); // 200KB limit
 }
 
 async function extractFacts() {
