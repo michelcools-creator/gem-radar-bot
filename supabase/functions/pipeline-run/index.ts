@@ -572,9 +572,9 @@ async function calculateScores() {
         
       console.log(`Scored ${coin.name}: ${scores.overall}`);
       
-      // Optional Discord webhook for high-scoring coins
+      // High score achieved - could add other notifications here if needed
       if (scores.overall >= 70 && scores.confidence >= 0.7) {
-        await sendDiscordAlert(coin, scores);
+        console.log(`High score alert: ${coin.name} achieved score ${scores.overall} with confidence ${scores.confidence}`);
       }
     } catch (error) {
       console.error(`Error scoring coin ${coin.id}:`, error);
@@ -932,55 +932,4 @@ function calculateCommunityScore(facts: any): number {
   }
   
   return Math.min(100, score);
-}
-
-async function sendDiscordAlert(coin: any, scores: any) {
-  try {
-    const discordWebhook = Deno.env.get('DISCORD_WEBHOOK_URL');
-    if (!discordWebhook) {
-      console.log('Discord webhook not configured, skipping alert');
-      return;
-    }
-    
-    const embed = {
-      title: `🚨 High-Score Coin Alert: ${coin.name} (${coin.symbol})`,
-      description: `New cryptocurrency detected with high potential score!`,
-      color: 0x00ff00, // Green color
-      fields: [
-        {
-          name: "Overall Score",
-          value: `${scores.overall}/100`,
-          inline: true
-        },
-        {
-          name: "Confidence",
-          value: `${Math.round(scores.confidence * 100)}%`,
-          inline: true
-        },
-        {
-          name: "Summary",
-          value: scores.summary || "No summary available",
-          inline: false
-        }
-      ],
-      footer: {
-        text: "NewCoin Radar Analysis System"
-      },
-      timestamp: new Date().toISOString()
-    };
-    
-    await fetch(discordWebhook, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        embeds: [embed]
-      })
-    });
-    
-    console.log(`Discord alert sent for ${coin.name}`);
-  } catch (error) {
-    console.error('Error sending Discord alert:', error);
-  }
 }
