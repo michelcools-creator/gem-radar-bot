@@ -417,7 +417,14 @@ export type Database = {
         | "analyzed"
         | "failed"
         | "insufficient_data"
-      page_status: "pending" | "fetched" | "failed" | "empty"
+        | "retry_pending"
+      page_status:
+        | "pending"
+        | "fetched"
+        | "failed"
+        | "empty"
+        | "invalid_content"
+        | "blocked"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -551,8 +558,16 @@ export const Constants = {
         "analyzed",
         "failed",
         "insufficient_data",
+        "retry_pending",
       ],
-      page_status: ["pending", "fetched", "failed", "empty"],
+      page_status: [
+        "pending",
+        "fetched",
+        "failed",
+        "empty",
+        "invalid_content",
+        "blocked",
+      ],
     },
   },
 } as const

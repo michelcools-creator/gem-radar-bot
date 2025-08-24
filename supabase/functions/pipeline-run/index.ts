@@ -31,9 +31,25 @@ serve(async (req) => {
 
   try {
     const body = req.method === 'POST' ? await req.json() : {};
-    const { manual_url } = body;
+    const { manual_url, reset_coin_id, reset_all_stuck } = body;
     
     console.log('Starting pipeline run...');
+    
+    if (reset_all_stuck) {
+      console.log('Resetting all stuck coins');
+      await resetAllStuckCoins();
+      return new Response(JSON.stringify({ success: true, action: 'all_coins_reset' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    
+    if (reset_coin_id) {
+      console.log('Resetting stuck coin:', reset_coin_id);
+      await resetStuckCoin(reset_coin_id);
+      return new Response(JSON.stringify({ success: true, action: 'coin_reset' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     
     if (manual_url) {
       console.log('Processing manual URL:', manual_url);
@@ -45,6 +61,9 @@ serve(async (req) => {
     
     // Step 2: Resolve official links for pending coins
     await resolveOfficialLinks();
+    
+    // Step 2.5: Handle retry cases for previously failed extractions
+    await handleRetries();
     
     // Step 3: Fetch pages for coins with official links
     await fetchPages();
@@ -159,6 +178,75 @@ async function processManualCoin(manual_url: string) {
   } catch (error) {
     console.error('Error processing manual coin:', error);
     throw new Error(`Failed to process manual coin: ${error.message}`);
+  }
+}
+
+async function resetStuckCoin(coinId: string) {
+  console.log(`Resetting stuck coin: ${coinId}`);
+  
+  try {
+    // Reset coin status and clean up associated data
+    await supabase
+      .from('coins')
+      .update({ status: 'pending' })
+      .eq('id', coinId);
+    
+    // Delete existing pages to force re-fetch
+    await supabase
+      .from('pages')
+      .delete()
+      .eq('coin_id', coinId);
+    
+    // Delete existing facts to force re-extraction
+    await supabase
+      .from('facts')
+      .delete()
+      .eq('coin_id', coinId);
+    
+    // Delete existing scores to force re-calculation
+    await supabase
+      .from('scores')
+      .delete()
+      .eq('coin_id', coinId);
+    
+    console.log(`Successfully reset coin ${coinId} to pending status`);
+    
+  } catch (error) {
+    console.error('Error resetting stuck coin:', error);
+    throw new Error(`Failed to reset coin: ${error.message}`);
+  }
+}
+
+async function resetAllStuckCoins() {
+  console.log('Resetting all stuck coins...');
+  
+  try {
+    // Find coins that have been stuck in processing/retry states for more than 1 hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    
+    const { data: stuckCoins } = await supabase
+      .from('coins')
+      .select('id, name, status, updated_at')
+      .in('status', ['processing', 'retry_pending'])
+      .lt('updated_at', oneHourAgo);
+    
+    if (!stuckCoins?.length) {
+      console.log('No stuck coins found');
+      return;
+    }
+    
+    console.log(`Found ${stuckCoins.length} stuck coins to reset`);
+    
+    for (const coin of stuckCoins) {
+      console.log(`Resetting stuck coin: ${coin.name} (${coin.status})`);
+      await resetStuckCoin(coin.id);
+    }
+    
+    console.log(`Successfully reset ${stuckCoins.length} stuck coins`);
+    
+  } catch (error) {
+    console.error('Error resetting all stuck coins:', error);
+    throw new Error(`Failed to reset stuck coins: ${error.message}`);
   }
 }
 
@@ -421,19 +509,167 @@ async function resolveOfficialLinks() {
 function parseOfficialLinks(html: string): Record<string, string> {
   const links: Record<string, string> = {};
   
-  // Look for website links
-  const websiteMatch = html.match(/href="(https?:\/\/[^"]+)"[^>]*>[\s\S]*?website/i);
-  if (websiteMatch) links.website = websiteMatch[1];
+  // Improved link extraction with content validation
+  const linkPatterns = [
+    // Website links with better context matching
+    { pattern: /href="(https?:\/\/[^"]+)"[^>]*>[^<]*(?:website|official|home|main)/i, type: 'website' },
+    // Documentation with more specific patterns
+    { pattern: /href="(https?:\/\/[^"]+)"[^>]*>[^<]*(?:docs|documentation|whitepaper|guide|api)/i, type: 'docs' },
+    // GitHub repositories
+    { pattern: /href="(https?:\/\/github\.com\/[^"\/]+\/[^"\/]+)"/i, type: 'github' },
+    // Blog/Medium posts
+    { pattern: /href="(https?:\/\/(?:medium\.com|blog\.|[^\/]+\.medium\.com)[^"]+)"/i, type: 'blog' },
+    // Twitter/X profiles (not individual posts)
+    { pattern: /href="(https?:\/\/(?:twitter\.com|x\.com)\/[a-zA-Z0-9_]+)(?:\/?)"/i, type: 'twitter' }
+  ];
   
-  // Look for documentation
-  const docsMatch = html.match(/href="(https?:\/\/[^"]+)"[^>]*>[\s\S]*?(docs|documentation|whitepaper)/i);
-  if (docsMatch) links.docs = docsMatch[1];
+  for (const { pattern, type } of linkPatterns) {
+    const match = html.match(pattern);
+    if (match && isValidContentUrl(match[1])) {
+      links[type] = match[1];
+    }
+  }
   
-  // Look for GitHub
-  const githubMatch = html.match(/href="(https?:\/\/github\.com\/[^"]+)"/i);
-  if (githubMatch) links.github = githubMatch[1];
+  // Additional extraction for project websites from structured data
+  const structuredLinks = extractStructuredLinks(html);
+  Object.assign(links, structuredLinks);
   
   return links;
+}
+
+function isValidContentUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url);
+    
+    // Exclude image and media URLs
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico', '.webp'];
+    const mediaExtensions = ['.mp4', '.mp3', '.pdf', '.zip'];
+    const excludedExtensions = [...imageExtensions, ...mediaExtensions];
+    
+    if (excludedExtensions.some(ext => urlObj.pathname.toLowerCase().endsWith(ext))) {
+      return false;
+    }
+    
+    // Exclude social media post URLs (keep profile URLs)
+    const socialPostPatterns = [
+      /twitter\.com\/[^\/]+\/status\//,
+      /x\.com\/[^\/]+\/status\//,
+      /t\.me\/[^\/]+\/\d+/,
+      /discord\.gg\//,
+      /t\.co\//
+    ];
+    
+    if (socialPostPatterns.some(pattern => pattern.test(url))) {
+      return false;
+    }
+    
+    // Exclude obvious ad/tracking URLs
+    const excludedDomains = [
+      'googletagmanager.com',
+      'google-analytics.com',
+      'facebook.com/tr',
+      'analytics.',
+      'ads.',
+      'doubleclick.net'
+    ];
+    
+    if (excludedDomains.some(domain => urlObj.hostname.includes(domain))) {
+      return false;
+    }
+    
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function extractStructuredLinks(html: string): Record<string, string> {
+  const links: Record<string, string> = {};
+  
+  // Look for JSON-LD structured data
+  const jsonLdMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+  if (jsonLdMatches) {
+    for (const match of jsonLdMatches) {
+      try {
+        const jsonContent = match.replace(/<[^>]*>/g, '');
+        const data = JSON.parse(jsonContent);
+        if (data.url && isValidContentUrl(data.url)) {
+          links.website = data.url;
+        }
+      } catch {
+        // Ignore malformed JSON
+      }
+    }
+  }
+  
+  // Look for meta properties
+  const metaPatterns = [
+    { pattern: /<meta[^>]*property=["']og:url["'][^>]*content=["']([^"']+)["']/i, type: 'website' },
+    { pattern: /<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i, type: 'website' }
+  ];
+  
+  for (const { pattern, type } of metaPatterns) {
+    const match = html.match(pattern);
+    if (match && isValidContentUrl(match[1]) && !links[type]) {
+      links[type] = match[1];
+    }
+  }
+  
+  return links;
+}
+
+async function handleRetries() {
+  console.log('Handling retries for previously failed extractions...');
+  
+  const { data: retryCoins } = await supabase
+    .from('coins')
+    .select('id, name, created_at')
+    .eq('status', 'retry_pending')
+    .limit(5);
+  
+  if (!retryCoins?.length) return;
+  
+  for (const coin of retryCoins) {
+    try {
+      // Check if the coin has been stuck in retry for too long (more than 24 hours)
+      const coinAge = new Date().getTime() - new Date(coin.created_at).getTime();
+      const maxRetryAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+      
+      if (coinAge > maxRetryAge) {
+        console.log(`Coin ${coin.name} has been in retry too long, marking as failed`);
+        await supabase
+          .from('coins')
+          .update({ status: 'failed' })
+          .eq('id', coin.id);
+        continue;
+      }
+      
+      // Check if we have pages for this coin
+      const { data: pages } = await supabase
+        .from('pages')
+        .select('id, status')
+        .eq('coin_id', coin.id)
+        .eq('status', 'fetched');
+      
+      if (pages && pages.length > 0) {
+        // We have pages, reset to processing to retry fact extraction
+        console.log(`Resetting ${coin.name} to processing status for fact extraction retry`);
+        await supabase
+          .from('coins')
+          .update({ status: 'processing' })
+          .eq('id', coin.id);
+      } else {
+        // No valid pages, reset to pending to retry from the beginning
+        console.log(`Resetting ${coin.name} to pending status for full retry`);
+        await supabase
+          .from('coins')
+          .update({ status: 'pending' })
+          .eq('id', coin.id);
+      }
+    } catch (error) {
+      console.error(`Error handling retry for coin ${coin.id}:`, error);
+    }
+  }
 }
 
 async function fetchPages() {
@@ -456,6 +692,7 @@ async function fetchPages() {
   
   for (const coin of coins) {
     const links = coin.official_links as Record<string, string>;
+    let successfulPages = 0;
     
     for (const [type, url] of Object.entries(links)) {
       if (!url || !isAllowedDomain(url, allowedDomains)) continue;
@@ -465,6 +702,32 @@ async function fetchPages() {
       
       while (attempt < maxAttempts) {
         try {
+          // Head request first to check content type
+          const headResponse = await fetch(url, {
+            method: 'HEAD',
+            headers: {
+              'User-Agent': 'NewCoinRadarResearchBot/1.0 (research purposes)',
+            },
+          });
+          
+          const contentType = headResponse.headers.get('content-type') || '';
+          
+          // Skip non-HTML content
+          if (!contentType.includes('text/html') && !contentType.includes('text/plain')) {
+            console.log(`Skipping non-HTML content: ${url} (${contentType})`);
+            await supabase
+              .from('pages')
+              .upsert({
+                coin_id: coin.id,
+                url,
+                status: 'invalid_content',
+                http_status: headResponse.status,
+                content_excerpt: `Skipped: ${contentType}`,
+                fetched_at: new Date().toISOString()
+              });
+            break;
+          }
+          
           const response = await fetch(url, {
             headers: {
               'User-Agent': 'NewCoinRadarResearchBot/1.0 (research purposes)',
@@ -474,9 +737,41 @@ async function fetchPages() {
           if (response.ok) {
             const html = await response.text();
             
+            // Validate that we got actual HTML content, not an image or binary data
+            if (html.length < 100 || !html.includes('<') || html.startsWith('data:image')) {
+              console.log(`Invalid HTML content from ${url}: length=${html.length}`);
+              await supabase
+                .from('pages')
+                .upsert({
+                  coin_id: coin.id,
+                  url,
+                  status: 'invalid_content',
+                  http_status: response.status,
+                  content_excerpt: 'Invalid or insufficient HTML content',
+                  fetched_at: new Date().toISOString()
+                });
+              break;
+            }
+            
             // Use improved text extraction with readability-like approach
             const cleanText = extractCleanTextImproved(html);
             const excerpt = cleanText.substring(0, 1000);
+            
+            // Validate extracted text quality
+            if (cleanText.length < 50) {
+              console.log(`Insufficient content extracted from ${url}: ${cleanText.length} chars`);
+              await supabase
+                .from('pages')
+                .upsert({
+                  coin_id: coin.id,
+                  url,
+                  status: 'invalid_content',
+                  http_status: response.status,
+                  content_excerpt: 'Insufficient extractable content',
+                  fetched_at: new Date().toISOString()
+                });
+              break;
+            }
             
             await supabase
               .from('pages')
@@ -489,7 +784,8 @@ async function fetchPages() {
                 content_excerpt: excerpt,
                 fetched_at: new Date().toISOString()
               });
-              
+            
+            successfulPages++;
             break; // Success, exit retry loop
           } else if (response.status === 429 || response.status >= 500) {
             // Exponential backoff for rate limits and server errors
@@ -500,10 +796,30 @@ async function fetchPages() {
               await new Promise(resolve => setTimeout(resolve, waitTime));
             } else {
               console.error(`Failed to fetch ${url} after ${maxAttempts} attempts: ${response.status}`);
+              await supabase
+                .from('pages')
+                .upsert({
+                  coin_id: coin.id,
+                  url,
+                  status: 'failed',
+                  http_status: response.status,
+                  content_excerpt: `Failed after ${maxAttempts} attempts: ${response.status}`,
+                  fetched_at: new Date().toISOString()
+                });
             }
           } else {
             // Other errors, don't retry
             console.error(`HTTP error for ${url}: ${response.status}`);
+            await supabase
+              .from('pages')
+              .upsert({
+                coin_id: coin.id,
+                url,
+                status: 'failed',
+                http_status: response.status,
+                content_excerpt: `HTTP error: ${response.status}`,
+                fetched_at: new Date().toISOString()
+              });
             break;
           }
         } catch (error) {
@@ -514,12 +830,31 @@ async function fetchPages() {
             await new Promise(resolve => setTimeout(resolve, waitTime));
           } else {
             console.error(`Error fetching page ${url}:`, error);
+            await supabase
+              .from('pages')
+              .upsert({
+                coin_id: coin.id,
+                url,
+                status: 'failed',
+                http_status: null,
+                content_excerpt: `Fetch error: ${error.message}`,
+                fetched_at: new Date().toISOString()
+              });
           }
         }
       }
       
       // Rate limiting between requests
       await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
+    // Update coin status based on page fetch results
+    if (successfulPages === 0) {
+      console.log(`No pages successfully fetched for coin ${coin.id}, marking as insufficient_data`);
+      await supabase
+        .from('coins')
+        .update({ status: 'insufficient_data' })
+        .eq('id', coin.id);
     }
   }
 }
@@ -663,13 +998,30 @@ async function extractFacts() {
     try {
       const pages = coin.pages as Array<{url: string, content_text: string}>;
       
+      // Filter out pages with insufficient content
+      const validPages = pages.filter(p => 
+        p.content_text && 
+        p.content_text.length > 100 && 
+        !p.content_text.startsWith('Invalid') &&
+        !p.content_text.startsWith('Skipped')
+      );
+      
+      if (validPages.length === 0) {
+        console.log(`No valid pages found for ${coin.name}, marking as insufficient_data`);
+        await supabase
+          .from('coins')
+          .update({ status: 'insufficient_data' })
+          .eq('id', coin.id);
+        continue;
+      }
+      
       const extractorPrompt = `
 COIN: ${coin.name} (${coin.symbol}) – ${coin.coingecko_coin_url}
 
 PAGES:
-${pages.map(p => `URL: ${p.url}\nCONTENT: ${p.content_text?.substring(0, 10000) || 'No content'}`).join('\n\n')}
+${validPages.map(p => `URL: ${p.url}\nCONTENT: ${p.content_text?.substring(0, 8000) || 'No content'}`).join('\n\n')}
 
-TASK: Extract structured facts and return ONLY JSON in this exact schema:
+TASK: Extract structured facts and return ONLY valid JSON (no markdown, no code blocks) in this exact schema:
 {
   "team": {"doxxed": true|false|"unknown", "members":[{"name":"...", "role":"...", "proof_url":"..."}]},
   "tokenomics": {"supply":"...", "vesting":"...", "utility":"...", "proof_urls":["..."]},
@@ -682,9 +1034,13 @@ TASK: Extract structured facts and return ONLY JSON in this exact schema:
   "meta": {"pages_used":[{"url":"...", "excerpt":"<=300 chars"}]}
 }
 
-CITE every claim with proof_urls and excerpts. Mark unknown as "unknown".
-Look specifically for on-chain partnerships, integrations, and verified smart contracts.
-Flag any brand copycats or misleading claims like "Official Bitcoin" or similar famous project names.
+REQUIREMENTS:
+- Return ONLY the JSON object, no markdown formatting, no backticks, no explanations
+- CITE every claim with proof_urls and excerpts 
+- Mark unknown data as "unknown" (string)
+- Look for on-chain partnerships, integrations, and verified smart contracts
+- Flag any brand copycats or misleading claims like "Official Bitcoin" or similar famous project names
+- Ensure all arrays are valid (use [] for empty arrays, not null)
 `;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -698,31 +1054,102 @@ Flag any brand copycats or misleading claims like "Official Bitcoin" or similar 
           messages: [
             {
               role: 'system',
-              content: 'You are a factual extractor. Return only JSON in the requested schema. Cite every claim with proof_urls and excerpts. No interpretations, no scores.'
+              content: 'You are a factual extractor. Return only valid JSON in the requested schema. No markdown formatting, no code blocks, no backticks. Cite every claim with proof_urls and excerpts. No interpretations, no scores. Output must be parseable by JSON.parse().'
             },
             {
               role: 'user', 
               content: extractorPrompt
             }
           ],
-          temperature: 0.2,
-          max_tokens: 2000
+          temperature: 0.1,
+          max_tokens: 2500
         }),
       });
       
       if (!response.ok) {
-        console.error(`OpenAI API error: ${response.status}`);
+        console.error(`OpenAI API error: ${response.status} ${response.statusText}`);
+        
+        // Mark coin as failed if API error persists
+        await supabase
+          .from('coins')
+          .update({ status: 'failed' })
+          .eq('id', coin.id);
         continue;
       }
       
       const result = await response.json();
-      const extractedText = result.choices[0].message.content;
+      let extractedText = result.choices[0].message.content;
+      
+      // Clean up common AI response formatting issues
+      extractedText = extractedText.trim();
+      
+      // Remove markdown code block formatting if present
+      if (extractedText.startsWith('```json')) {
+        extractedText = extractedText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (extractedText.startsWith('```')) {
+        extractedText = extractedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      // Remove any leading/trailing non-JSON text
+      const jsonStart = extractedText.indexOf('{');
+      const jsonEnd = extractedText.lastIndexOf('}');
+      
+      if (jsonStart === -1 || jsonEnd === -1 || jsonStart >= jsonEnd) {
+        console.error(`No valid JSON found in AI response for ${coin.name}`);
+        console.log('AI Response:', extractedText.substring(0, 500));
+        
+        // Try with a simpler fallback prompt
+        const fallbackData = {
+          team: { doxxed: "unknown", members: [] },
+          tokenomics: { supply: "unknown", vesting: "unknown", utility: "unknown", proof_urls: [] },
+          security: { audit_links: [], owner_controls: "unknown", risky_language: [], proof_urls: [] },
+          product: { mvp: "unknown", roadmap_items: [], proof_urls: [] },
+          market: { narrative: "unknown", competitors: [], proof_urls: [] },
+          community: { channels: [], notable_engagement: "unknown", proof_urls: [] },
+          on_chain_traction: { partnerships: [], integrations: [], contracts_verified: false, proof_urls: [] },
+          brand_analysis: { similar_names: [], copycat_indicators: [], misleading_claims: [] },
+          meta: { pages_used: validPages.map(p => ({ url: p.url, excerpt: p.content_text.substring(0, 300) })) }
+        };
+        
+        await supabase
+          .from('facts')
+          .insert({
+            coin_id: coin.id,
+            extracted: fallbackData,
+            sources: { pages: validPages.map(p => p.url), error: 'AI_PARSE_FALLBACK' }
+          });
+          
+        console.log(`Used fallback data for ${coin.name} due to AI parse error`);
+        continue;
+      }
+      
+      extractedText = extractedText.substring(jsonStart, jsonEnd + 1);
       
       let extractedData;
       try {
         extractedData = JSON.parse(extractedText);
-      } catch (e) {
-        console.error('Failed to parse extracted JSON:', e);
+        
+        // Validate the structure has required fields
+        const requiredFields = ['team', 'tokenomics', 'security', 'product', 'market', 'community'];
+        const missingFields = requiredFields.filter(field => !extractedData[field]);
+        
+        if (missingFields.length > 0) {
+          console.warn(`Missing fields in extracted data for ${coin.name}: ${missingFields.join(', ')}`);
+          // Fill in missing fields with default structure
+          missingFields.forEach(field => {
+            extractedData[field] = { proof_urls: [] };
+          });
+        }
+        
+      } catch (parseError) {
+        console.error(`JSON parse error for ${coin.name}:`, parseError.message);
+        console.log('Attempted to parse:', extractedText.substring(0, 500));
+        
+        // Mark coin for retry or as failed
+        await supabase
+          .from('coins')
+          .update({ status: 'retry_pending' })
+          .eq('id', coin.id);
         continue;
       }
       
@@ -731,12 +1158,19 @@ Flag any brand copycats or misleading claims like "Official Bitcoin" or similar 
         .insert({
           coin_id: coin.id,
           extracted: extractedData,
-          sources: { pages: pages.map(p => p.url) }
+          sources: { pages: validPages.map(p => p.url) }
         });
         
-      console.log(`Extracted facts for ${coin.name}`);
+      console.log(`Successfully extracted facts for ${coin.name}`);
+      
     } catch (error) {
       console.error(`Error extracting facts for coin ${coin.id}:`, error);
+      
+      // Mark coin as failed after multiple extraction errors
+      await supabase
+        .from('coins')
+        .update({ status: 'failed' })
+        .eq('id', coin.id);
     }
   }
 }
