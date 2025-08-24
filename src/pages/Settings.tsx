@@ -34,7 +34,8 @@ const Settings = () => {
     weights_json: {},
     hybrid_mode: false,
     allow_domains: [] as string[],
-    strategy_version: '1.0'
+    strategy_version: '1.0',
+    chatgpt_pro_api_key: ''
   });
 
   React.useEffect(() => {
@@ -43,7 +44,8 @@ const Settings = () => {
         weights_json: settings.weights_json as any || {},
         hybrid_mode: settings.hybrid_mode || false,
         allow_domains: settings.allow_domains || [],
-        strategy_version: settings.strategy_version || '1.0'
+        strategy_version: settings.strategy_version || '1.0',
+        chatgpt_pro_api_key: settings.chatgpt_pro_api_key || ''
       });
     }
   }, [settings]);
@@ -56,7 +58,8 @@ const Settings = () => {
           weights_json: newSettings.weights_json,
           hybrid_mode: newSettings.hybrid_mode,
           allow_domains: newSettings.allow_domains,
-          strategy_version: newSettings.strategy_version
+          strategy_version: newSettings.strategy_version,
+          chatgpt_pro_api_key: newSettings.chatgpt_pro_api_key
         })
         .eq('id', 1);
       
@@ -333,6 +336,32 @@ const Settings = () => {
                 onChange={(e) => setFormData(prev => ({ ...prev, strategy_version: e.target.value }))}
                 className="mt-1 max-w-xs"
               />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* API Configuration */}
+        <Card>
+          <CardHeader>
+            <CardTitle>API Configuration</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Configure your own API keys for better analysis quality
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div>
+              <Label htmlFor="chatgpt_pro_api_key">ChatGPT Pro API Key (Optional)</Label>
+              <Input
+                id="chatgpt_pro_api_key"
+                type="password"
+                value={formData.chatgpt_pro_api_key}
+                onChange={(e) => setFormData(prev => ({ ...prev, chatgpt_pro_api_key: e.target.value }))}
+                placeholder="sk-proj-..."
+                className="mt-1"
+              />
+              <p className="text-sm text-muted-foreground mt-2">
+                Enter your ChatGPT Pro API key to use GPT-5 for significantly better analysis quality. If not provided, the default OpenAI key will be used with GPT-4o-mini.
+              </p>
             </div>
           </CardContent>
         </Card>

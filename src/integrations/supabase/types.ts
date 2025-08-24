@@ -248,6 +248,7 @@ export type Database = {
       settings: {
         Row: {
           allow_domains: string[] | null
+          chatgpt_pro_api_key: string | null
           created_at: string
           hybrid_mode: boolean
           id: number
@@ -257,6 +258,7 @@ export type Database = {
         }
         Insert: {
           allow_domains?: string[] | null
+          chatgpt_pro_api_key?: string | null
           created_at?: string
           hybrid_mode?: boolean
           id?: number
@@ -266,6 +268,7 @@ export type Database = {
         }
         Update: {
           allow_domains?: string[] | null
+          chatgpt_pro_api_key?: string | null
           created_at?: string
           hybrid_mode?: boolean
           id?: number

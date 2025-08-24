@@ -991,6 +991,19 @@ function extractCleanTextFallback(html: string): string {
 async function extractFacts() {
   console.log('Extracting facts using LLM...');
   
+  // Get settings to check for ChatGPT Pro API key
+  const { data: settings } = await supabase
+    .from('settings')
+    .select('chatgpt_pro_api_key')
+    .eq('id', 1)
+    .single();
+
+  // Use ChatGPT Pro API key if available, otherwise fallback to OPENAI_API_KEY
+  const apiKey = settings?.chatgpt_pro_api_key || Deno.env.get('OPENAI_API_KEY');
+  const model = settings?.chatgpt_pro_api_key ? 'gpt-5-2025-08-07' : 'gpt-4o-mini';
+  
+  console.log(`Using model: ${model} with ${settings?.chatgpt_pro_api_key ? 'user' : 'default'} API key`);
+  
   const { data: coins } = await supabase
     .from('coins')
     .select(`
@@ -1003,9 +1016,8 @@ async function extractFacts() {
   
   if (!coins?.length) return;
   
-  const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
-  if (!openaiApiKey) {
-    throw new Error('OpenAI API key not configured');
+  if (!apiKey) {
+    throw new Error('No API key configured');
   }
   
   for (const coin of coins) {
@@ -1057,27 +1069,37 @@ REQUIREMENTS:
 - Ensure all arrays are valid (use [] for empty arrays, not null)
 `;
 
+      // Prepare request body based on model
+      const requestBody: any = {
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a factual extractor. Return only valid JSON in the requested schema. No markdown formatting, no code blocks, no backticks. Cite every claim with proof_urls and excerpts. No interpretations, no scores. Output must be parseable by JSON.parse().'
+          },
+          {
+            role: 'user', 
+            content: extractorPrompt
+          }
+        ]
+      };
+
+      // Use correct parameters based on model
+      if (model === 'gpt-5-2025-08-07') {
+        requestBody.max_completion_tokens = 2500;
+        // GPT-5 doesn't support temperature parameter
+      } else {
+        requestBody.max_tokens = 2500;
+        requestBody.temperature = 0.1;
+      }
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a factual extractor. Return only valid JSON in the requested schema. No markdown formatting, no code blocks, no backticks. Cite every claim with proof_urls and excerpts. No interpretations, no scores. Output must be parseable by JSON.parse().'
-            },
-            {
-              role: 'user', 
-              content: extractorPrompt
-            }
-          ],
-          temperature: 0.1,
-          max_tokens: 2500
-        }),
+        body: JSON.stringify(requestBody),
       });
       
       if (!response.ok) {
