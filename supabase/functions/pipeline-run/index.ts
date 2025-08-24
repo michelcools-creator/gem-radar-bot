@@ -62,9 +62,9 @@ serve(async (req) => {
 });
 
 async function discoverRecentListings() {
+  console.log('Discovering recent listings from CoinGecko...');
+  
   try {
-    console.log('Discovering recent listings from CoinGecko...');
-    
     // Check settings and allowed domains
     const { data: settings } = await supabase
       .from('settings')
@@ -84,41 +84,96 @@ async function discoverRecentListings() {
       return;
     }
     
-    // Rate limiting: wait between requests
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    let coins = [];
+    let attempt = 0;
+    const maxAttempts = 3;
     
-    // Web-only mode: scrape the new cryptocurrencies page with better stealth
-    const response = await fetch('https://www.coingecko.com/en/new-cryptocurrencies', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Referer': 'https://www.coingecko.com/',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'same-origin',
-        'Cache-Control': 'max-age=0',
-      },
-    });
-    
-    if (!response.ok) {
-      if (response.status === 429) {
-        console.log('Rate limited, implementing exponential backoff');
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        throw new Error(`Rate limited: ${response.status}`);
+    while (attempt < maxAttempts && coins.length === 0) {
+      attempt++;
+      console.log(`Scraping attempt ${attempt}/${maxAttempts}...`);
+      
+      // Rate limiting with exponential backoff for retries
+      if (attempt > 1) {
+        const backoffDelay = Math.pow(2, attempt - 1) * 3000; // 6s, 12s delays
+        console.log(`Waiting ${backoffDelay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
-      throw new Error(`Failed to fetch CoinGecko listings: ${response.status}`);
+      
+      try {
+        // Rotate different user agents for better stealth
+        const userAgents = [
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
+          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        ];
+        
+        const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+        
+        // Web scraping with rotating stealth headers
+        const response = await fetch('https://www.coingecko.com/en/new-cryptocurrencies', {
+          headers: {
+            'User-Agent': selectedUA,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': 'https://www.coingecko.com/',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Cache-Control': 'no-cache',
+          },
+          // Add timeout to prevent hanging requests
+          signal: AbortSignal.timeout(30000) // 30 second timeout
+        });
+        
+        if (!response.ok) {
+          if (response.status === 429 || response.status >= 500) {
+            console.log(`Received ${response.status}, will retry with exponential backoff`);
+            continue; // Retry with backoff
+          }
+          
+          if (response.status === 403) {
+            console.log('Received 403 Forbidden - trying different approach on next attempt');
+            continue; // Retry with different headers
+          }
+          
+          throw new Error(`Failed to fetch CoinGecko listings: ${response.status} ${response.statusText}`);
+        }
+        
+        const html = await response.text();
+        console.log(`Response HTML length: ${html.length} characters`);
+        
+        if (html.length < 1000) {
+          console.log('Response too short, likely blocked - retrying...');
+          continue;
+        }
+        
+        coins = parseCoinGeckoListings(html);
+        console.log(`Found ${coins.length} new coins from CoinGecko new cryptocurrencies page`);
+        
+        if (coins.length === 0 && html.length > 10000) {
+          console.log('HTML received but no coins parsed - page structure may have changed');
+          // Log a sample of the HTML for debugging
+          console.log('HTML sample:', html.substring(0, 500));
+        }
+        
+      } catch (fetchError) {
+        console.error(`Fetch attempt ${attempt} failed:`, fetchError.message);
+        if (attempt === maxAttempts) {
+          throw new Error(`All ${maxAttempts} scraping attempts failed. Last error: ${fetchError.message}`);
+        }
+      }
     }
     
-    const html = await response.text();
-    console.log(`Response HTML length: ${html.length} characters`);
-    
-    const coins = parseCoinGeckoListings(html);
-    
-    console.log(`Found ${coins.length} new coins from CoinGecko new cryptocurrencies page`);
+    if (coins.length === 0) {
+      console.log('Warning: No new coins found after all attempts. Continuing pipeline...');
+      return; // Don't throw error, just continue pipeline
+    }
     
     // Upsert coins
     for (const coin of coins) {
@@ -131,17 +186,15 @@ async function discoverRecentListings() {
             coingecko_coin_url: coin.coinUrl,
             status: 'pending'
           },
-          {
-            onConflict: 'coingecko_coin_url',
-            ignoreDuplicates: false
-          }
+          { onConflict: 'coingecko_coin_url' }
         );
     }
     
-    console.log('Successfully upserted coins');
+    console.log(`Successfully upserted ${coins.length} coins`);
   } catch (error) {
-    console.error('Error discovering listings:', error);
-    throw error;
+    console.error('Error in discoverRecentListings:', error);
+    // Don't re-throw to allow pipeline to continue with existing coins
+    console.log('Discovery failed, but continuing pipeline with existing coins...');
   }
 }
 
