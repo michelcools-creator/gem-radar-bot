@@ -110,7 +110,7 @@ const Dashboard = () => {
   });
 
   const validateCoinGeckoUrl = (url: string) => {
-    const regex = /^https?:\/\/(www\.)?coingecko\.com\/en\/coins\/[a-zA-Z0-9-_]+$/;
+    const regex = /^https?:\/\/(www\.)?coingecko\.com\/[a-z]{2}\/coins\/[a-zA-Z0-9-_]+$/;
     return regex.test(url);
   };
 
