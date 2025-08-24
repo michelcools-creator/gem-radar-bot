@@ -30,7 +30,21 @@ serve(async (req) => {
   }
 
   try {
-    const body = req.method === 'POST' ? await req.json() : {};
+    // Safely parse JSON body, handle empty body case
+    let body = {};
+    if (req.method === 'POST') {
+      try {
+        const text = await req.text();
+        if (text.trim()) {
+          body = JSON.parse(text);
+        }
+      } catch (parseError) {
+        console.error('JSON parse error:', parseError);
+        // If parsing fails, continue with empty body
+        body = {};
+      }
+    }
+    
     const { manual_url, reset_coin_id, reset_all_stuck } = body;
     
     console.log('Starting pipeline run...');
@@ -91,8 +105,8 @@ serve(async (req) => {
 async function processManualCoin(manual_url: string) {
   console.log('Processing manual coin URL:', manual_url);
   
-  // Validate URL format
-  const coinGeckoRegex = /^https?:\/\/(www\.)?coingecko\.com\/en\/coins\/([a-zA-Z0-9-_]+)$/;
+  // Validate URL format - now supports all language codes
+  const coinGeckoRegex = /^https?:\/\/(www\.)?coingecko\.com\/[a-z]{2}\/coins\/([a-zA-Z0-9-_]+)$/;
   const match = manual_url.match(coinGeckoRegex);
   
   if (!match) {
