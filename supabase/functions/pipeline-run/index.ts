@@ -30,10 +30,18 @@ serve(async (req) => {
   }
 
   try {
+    const body = req.method === 'POST' ? await req.json() : {};
+    const { manual_url } = body;
+    
     console.log('Starting pipeline run...');
     
-    // Step 1: Discover recent listings
-    await discoverRecentListings();
+    if (manual_url) {
+      console.log('Processing manual URL:', manual_url);
+      await processManualCoin(manual_url);
+    } else {
+      // Step 1: Discover recent listings
+      await discoverRecentListings();
+    }
     
     // Step 2: Resolve official links for pending coins
     await resolveOfficialLinks();
@@ -60,6 +68,99 @@ serve(async (req) => {
     });
   }
 });
+
+async function processManualCoin(manual_url: string) {
+  console.log('Processing manual coin URL:', manual_url);
+  
+  // Validate URL format
+  const coinGeckoRegex = /^https?:\/\/(www\.)?coingecko\.com\/en\/coins\/([a-zA-Z0-9-_]+)$/;
+  const match = manual_url.match(coinGeckoRegex);
+  
+  if (!match) {
+    throw new Error('Invalid CoinGecko URL format');
+  }
+  
+  const coinId = match[2];
+  
+  try {
+    // Fetch the CoinGecko page to extract coin info
+    const response = await fetch(manual_url, {
+      headers: {
+        'User-Agent': 'NewCoinRadarResearchBot/1.0 (research purposes)',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch coin page: ${response.status}`);
+    }
+    
+    const html = await response.text();
+    
+    // Extract coin name and symbol from HTML
+    let name = coinId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()); // fallback
+    let symbol = coinId.toUpperCase(); // fallback
+    
+    // Try to extract actual name and symbol
+    const titleMatch = html.match(/<title[^>]*>([^<]+)/i);
+    if (titleMatch) {
+      const title = titleMatch[1];
+      const nameSymbolMatch = title.match(/^([^|]+?)\s*\(([A-Z0-9]+)\)/);
+      if (nameSymbolMatch) {
+        name = nameSymbolMatch[1].trim();
+        symbol = nameSymbolMatch[2].trim();
+      }
+    }
+    
+    // Alternative extraction from h1 or main content
+    if (!name || name === coinId) {
+      const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+      if (h1Match) {
+        const h1Content = h1Match[1].replace(/<[^>]*>/g, '').trim();
+        if (h1Content && h1Content.length < 50) {
+          name = h1Content;
+        }
+      }
+    }
+    
+    console.log(`Extracted coin info - Name: ${name}, Symbol: ${symbol}`);
+    
+    // Check if coin already exists
+    const { data: existingCoin } = await supabase
+      .from('coins')
+      .select('id, name, status')
+      .eq('coingecko_coin_url', manual_url)
+      .single();
+    
+    if (existingCoin) {
+      console.log(`Coin already exists: ${existingCoin.name} (${existingCoin.status})`);
+      return; // Don't throw error, just continue with existing coin
+    }
+    
+    // Insert new coin with manual source
+    const { data: newCoin, error } = await supabase
+      .from('coins')
+      .insert({
+        name: name,
+        symbol: symbol,
+        coingecko_coin_url: manual_url,
+        manual_url: manual_url,
+        source: 'manual_input',
+        status: 'pending'
+      })
+      .select('id, name')
+      .single();
+    
+    if (error) {
+      throw error;
+    }
+    
+    console.log(`Successfully added manual coin: ${newCoin.name}`);
+    
+  } catch (error) {
+    console.error('Error processing manual coin:', error);
+    throw new Error(`Failed to process manual coin: ${error.message}`);
+  }
+}
 
 async function discoverRecentListings() {
   console.log('Discovering recent listings from CoinGecko...');

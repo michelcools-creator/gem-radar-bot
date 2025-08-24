@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { AlertCircle, TrendingUp, RefreshCw, ExternalLink } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { AlertCircle, TrendingUp, RefreshCw, ExternalLink, Search } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -31,6 +32,8 @@ const Dashboard = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isRunning, setIsRunning] = useState(false);
+  const [manualUrl, setManualUrl] = useState('');
+  const [isAnalyzingManual, setIsAnalyzingManual] = useState(false);
 
   const { data: coins, isLoading } = useQuery({
     queryKey: ['coins'],
@@ -74,6 +77,62 @@ const Dashboard = () => {
       setIsRunning(false);
     }
   });
+
+  const analyzeManualCoin = useMutation({
+    mutationFn: async (url: string) => {
+      setIsAnalyzingManual(true);
+      const { data, error } = await supabase.functions.invoke('pipeline-run', {
+        body: { manual_url: url }
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Manual Analysis Started",
+        description: "Analyzing the specified coin. Results will appear shortly.",
+      });
+      setManualUrl('');
+      queryClient.invalidateQueries({ queryKey: ['coins'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Analysis Error",
+        description: error.message || "Failed to analyze coin",
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      setIsAnalyzingManual(false);
+    }
+  });
+
+  const validateCoinGeckoUrl = (url: string) => {
+    const regex = /^https?:\/\/(www\.)?coingecko\.com\/en\/coins\/[a-zA-Z0-9-_]+$/;
+    return regex.test(url);
+  };
+
+  const handleManualAnalysis = () => {
+    if (!manualUrl.trim()) {
+      toast({
+        title: "URL Required",
+        description: "Please enter a CoinGecko coin URL",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!validateCoinGeckoUrl(manualUrl)) {
+      toast({
+        title: "Invalid URL",
+        description: "Please enter a valid CoinGecko coin URL (e.g., https://www.coingecko.com/en/coins/bitcoin)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    analyzeManualCoin.mutate(manualUrl);
+  };
 
   const getStatusColor = (status: string) => {
     const colors = {
@@ -130,7 +189,30 @@ const Dashboard = () => {
             Analyzes new cryptocurrency projects using Web-Only scoring methodology
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end">
+          <div className="flex gap-2 flex-1">
+            <div className="flex-1 max-w-md">
+              <Input
+                placeholder="https://www.coingecko.com/en/coins/bitcoin"
+                value={manualUrl}
+                onChange={(e) => setManualUrl(e.target.value)}
+                className="border-primary/20 focus:border-primary/40"
+              />
+            </div>
+            <Button
+              variant="outline"
+              onClick={handleManualAnalysis}
+              disabled={isAnalyzingManual}
+              className="border-primary/20 hover:border-primary/40 hover:bg-primary/5"
+            >
+              {isAnalyzingManual ? (
+                <LoadingSpinner size="sm" className="mr-2" />
+              ) : (
+                <Search className="w-4 h-4 mr-2" />
+              )}
+              {isAnalyzingManual ? 'Analyzing...' : 'Analyze Coin'}
+            </Button>
+          </div>
           <Button
             variant="outline"
             onClick={() => runPipeline.mutate()}
@@ -142,7 +224,7 @@ const Dashboard = () => {
             ) : (
               <TrendingUp className="w-4 h-4 mr-2" />
             )}
-            {isRunning ? 'Running...' : 'Run Analysis'}
+            {isRunning ? 'Running...' : 'Discover New Coins'}
           </Button>
         </div>
       </div>

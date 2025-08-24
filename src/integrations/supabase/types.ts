@@ -65,8 +65,10 @@ export type Database = {
           created_at: string
           first_seen: string
           id: string
+          manual_url: string | null
           name: string
           official_links: Json | null
+          source: string | null
           status: Database["public"]["Enums"]["coin_status"]
           symbol: string
           updated_at: string
@@ -76,8 +78,10 @@ export type Database = {
           created_at?: string
           first_seen?: string
           id?: string
+          manual_url?: string | null
           name: string
           official_links?: Json | null
+          source?: string | null
           status?: Database["public"]["Enums"]["coin_status"]
           symbol: string
           updated_at?: string
@@ -87,8 +91,10 @@ export type Database = {
           created_at?: string
           first_seen?: string
           id?: string
+          manual_url?: string | null
           name?: string
           official_links?: Json | null
+          source?: string | null
           status?: Database["public"]["Enums"]["coin_status"]
           symbol?: string
           updated_at?: string
