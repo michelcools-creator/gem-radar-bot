@@ -1050,26 +1050,48 @@ COIN: ${coin.name} (${coin.symbol}) – ${coin.coingecko_coin_url}
 PAGES:
 ${validPages.map(p => `URL: ${p.url}\nCONTENT: ${p.content_text?.substring(0, 8000) || 'No content'}`).join('\n\n')}
 
-TASK: Extract structured facts and return ONLY valid JSON (no markdown, no code blocks) in this exact schema:
+TASK: Extract structured evidence and return ONLY valid JSON (no markdown, no code blocks) in this exact schema:
 {
-  "team": {"doxxed": true|false|"unknown", "members":[{"name":"...", "role":"...", "proof_url":"..."}]},
-  "tokenomics": {"supply":"...", "vesting":"...", "utility":"...", "proof_urls":["..."]},
-  "security": {"audit_links":["..."], "owner_controls":"...", "risky_language": ["guaranteed returns"], "proof_urls":["..."]},
-  "product": {"mvp":"yes|no|unknown", "roadmap_items":[{"milestone":"...", "date":"..."}], "proof_urls":["..."]},
-  "market": {"narrative":"...", "competitors":["..."], "proof_urls":["..."]},
-  "community": {"channels":["x","discord"], "notable_engagement":"...", "proof_urls":["..."]},
-  "on_chain_traction": {"partnerships":["..."], "integrations":["..."], "contracts_verified":true|false, "proof_urls":["..."]},
-  "brand_analysis": {"similar_names":["..."], "copycat_indicators":["..."], "misleading_claims":["..."]},
-  "meta": {"pages_used":[{"url":"...", "excerpt":"<=300 chars"}]}
+  "claims": [
+    {
+      "id": "SEC-001",
+      "pillar": "security|tokenomics|team|product|market|community|traction",
+      "type": "audit|supply|vesting|doxxed_team|mvp|roadmap_date|partner|integration|competitor|channel|risk_language|legal",
+      "value": "Short factual statement",
+      "proof_urls": ["url1", "url2"],
+      "excerpt": "Direct quote from source (≤300 chars)",
+      "confidence_local": 0.8
+    }
+  ],
+  "on_chain_traction": {
+    "partners": [{"name": "Partner Name", "proof_url": "url"}],
+    "integrations": [{"name": "Platform", "type": "dex|l2|wallet|oracle|infra|exchange", "proof_url": "url"}]
+  },
+  "contradictions": [
+    {
+      "claim_ids": ["SEC-001", "SEC-002"], 
+      "reason": "Supply numbers differ between whitepaper and website",
+      "proof_urls": ["url1", "url2"]
+    }
+  ],
+  "red_flags": {
+    "guaranteed_returns": ["phrase1", "phrase2"],
+    "audit_claim_no_source": true,
+    "suspected_copycat": {"brand": "Bitcoin", "reason": "domain similarity", "proof_urls": ["url"]},
+    "misleading_claims": [{"claim_id": "MKT-001", "reason": "Exaggerated partnership claim"}]
+  }
 }
 
 REQUIREMENTS:
 - Return ONLY the JSON object, no markdown formatting, no backticks, no explanations
-- CITE every claim with proof_urls and excerpts 
-- Mark unknown data as "unknown" (string)
-- Look for on-chain partnerships, integrations, and verified smart contracts
-- Flag any brand copycats or misleading claims like "Official Bitcoin" or similar famous project names
-- Ensure all arrays are valid (use [] for empty arrays, not null)
+- Generate claims for ALL pillars: security, tokenomics, team, product, market, community, traction
+- Each claim MUST have proof_urls from the provided PAGES and direct excerpts
+- Use "unknown" for pillar if no reliable information found - do NOT guess or infer
+- Detect partners/integrations mentioned with "integrate", "partner", "listed", "supports", "built on"
+- Flag guaranteed returns phrases like "guaranteed profits", "risk-free", "100% returns"
+- Flag audit claims without source links
+- Flag suspected copycats (similar names to major projects)
+- All arrays must be valid JSON (use [] for empty, not null)
 `;
 
       // Prepare request body based on model
@@ -1078,7 +1100,7 @@ REQUIREMENTS:
         messages: [
           {
             role: 'system',
-            content: 'You are a factual extractor. Return only valid JSON in the requested schema. No markdown formatting, no code blocks, no backticks. Cite every claim with proof_urls and excerpts. No interpretations, no scores. Output must be parseable by JSON.parse().'
+            content: 'You are a FACTUAL EXTRACTOR. Return ONLY valid JSON conforming to schema. NO explanations, NO text outside JSON. Unknown = "unknown". Each claim must have ≥1 proof_url from PAGES plus excerpt (≤300 chars). Detect contradictions and red_flags (guaranteed_returns, audit_claim_no_source, suspected_copycat).'
           },
           {
             role: 'user', 
@@ -1093,7 +1115,7 @@ REQUIREMENTS:
         // GPT-5 doesn't support temperature parameter
       } else {
         requestBody.max_tokens = 2500;
-        requestBody.temperature = 0.1;
+        requestBody.temperature = 0.0; // Set to 0.0 for strict JSON output
       }
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1168,16 +1190,26 @@ REQUIREMENTS:
       try {
         extractedData = JSON.parse(extractedText);
         
-        // Validate the structure has required fields
-        const requiredFields = ['team', 'tokenomics', 'security', 'product', 'market', 'community'];
-        const missingFields = requiredFields.filter(field => !extractedData[field]);
+        // Validate the structure has required fields for new claims-based schema
+        if (!extractedData.claims || !Array.isArray(extractedData.claims)) {
+          console.warn(`Invalid claims structure for ${coin.name}, using fallback`);
+          extractedData.claims = [];
+        }
         
-        if (missingFields.length > 0) {
-          console.warn(`Missing fields in extracted data for ${coin.name}: ${missingFields.join(', ')}`);
-          // Fill in missing fields with default structure
-          missingFields.forEach(field => {
-            extractedData[field] = { proof_urls: [] };
-          });
+        // Ensure required structures exist
+        if (!extractedData.on_chain_traction) {
+          extractedData.on_chain_traction = { partners: [], integrations: [] };
+        }
+        if (!extractedData.contradictions) {
+          extractedData.contradictions = [];
+        }
+        if (!extractedData.red_flags) {
+          extractedData.red_flags = {
+            guaranteed_returns: [],
+            audit_claim_no_source: false,
+            suspected_copycat: null,
+            misleading_claims: []
+          };
         }
         
       } catch (parseError) {
@@ -1276,96 +1308,130 @@ function calculateCoinScore(facts: any, weights: Record<string, number>, coin: a
   let penalties = 0;
   const red_flags: string[] = [];
   const green_flags: string[] = [];
+  let overall_cap: number | null = null;
   
   // Web-Only Scoring with exact weights specified
   const w = weights || DEFAULT_SCORING_WEIGHTS;
   
-  // Security & Rug-Pull Detection (15%) - based on claims/audit links
-  let securityScore = calculateSecurityScore(facts);
+  // Extract claims by pillar for scoring
+  const claimsByPillar = (facts.claims || []).reduce((acc: any, claim: any) => {
+    if (!acc[claim.pillar]) acc[claim.pillar] = [];
+    acc[claim.pillar].push(claim);
+    return acc;
+  }, {});
+  
+  // Security & Rug-Pull Detection (15%) - based on security claims
+  let securityScore = calculateSecurityScoreFromClaims(claimsByPillar.security || []);
   pillars.security_rug_pull = (securityScore / 100) * w.security_rug_pull;
   
-  // Tokenomics (10%) - public supply/vesting info
-  let tokenomicsScore = calculateTokenomicsScore(facts);
+  // Tokenomics (10%) - based on tokenomics claims  
+  let tokenomicsScore = calculateTokenomicsScoreFromClaims(claimsByPillar.tokenomics || []);
   pillars.tokenomics = (tokenomicsScore / 100) * w.tokenomics;
   
-  // Team & Transparency (20%) - doxxed team, bios, LinkedIn
-  let teamScore = calculateTeamScore(facts);
+  // Team & Transparency (20%) - based on team claims
+  let teamScore = calculateTeamScoreFromClaims(claimsByPillar.team || []);
   pillars.team_transparency = (teamScore / 100) * w.team_transparency;
   
-  // Product & Roadmap (20%) - demo/MVP, documentation quality
-  let productScore = calculateProductScore(facts);
+  // Product & Roadmap (20%) - based on product claims
+  let productScore = calculateProductScoreFromClaims(claimsByPillar.product || []);
   pillars.product_roadmap = (productScore / 100) * w.product_roadmap;
   
-  // On-chain Traction (10%) - partners/integrations mentioned publicly
-  let tractionScore = calculateTractionScore(facts);
+  // On-chain Traction (10%) - based on traction claims and on_chain_traction data
+  let tractionScore = calculateTractionScoreFromClaims(claimsByPillar.traction || [], facts.on_chain_traction);
   pillars.onchain_traction = (tractionScore / 100) * w.onchain_traction;
   
-  // Market/Narrative Fit (15%) - positioning vs competitors
-  let marketScore = calculateMarketScore(facts);
+  // Market/Narrative Fit (15%) - based on market claims
+  let marketScore = calculateMarketScoreFromClaims(claimsByPillar.market || []);
   pillars.market_narrative = (marketScore / 100) * w.market_narrative;
   
-  // Community (10%) - engagement from publicly visible channels
-  let communityScore = calculateCommunityScore(facts);
+  // Community (10%) - based on community claims
+  let communityScore = calculateCommunityScoreFromClaims(claimsByPillar.community || []);
   pillars.community = (communityScore / 100) * w.community;
   
-  // Apply hard caps and penalties as specified
-  let brandPenalty = 0;
-  
-  // Brand abuse detection
-  if (facts.brand_analysis?.copycat_indicators?.length > 0) {
-    brandPenalty += 25;
-    red_flags.push("Brand copycat indicators detected (-25 points)");
+  // Apply penalties based on red_flags
+  if (facts.red_flags?.guaranteed_returns?.length > 0) {
+    const returnPhrases = facts.red_flags.guaranteed_returns;
+    let returnPenalty = 10; // base penalty
+    
+    // Adjust penalty based on strength of phrases (-5 to -15 range)
+    const strongPhrases = returnPhrases.filter((phrase: string) => 
+      phrase.toLowerCase().includes('100%') || 
+      phrase.toLowerCase().includes('risk-free') ||
+      phrase.toLowerCase().includes('guaranteed profit')
+    );
+    if (strongPhrases.length > 0) returnPenalty = 15;
+    else if (returnPhrases.length > 2) returnPenalty = 12;
+    
+    penalties += returnPenalty;
+    red_flags.push(`Guaranteed return promises detected (-${returnPenalty} points)`);
   }
   
-  if (facts.brand_analysis?.misleading_claims?.length > 0) {
-    brandPenalty += 30;
-    red_flags.push("Misleading brand claims detected (-30 points)");
-  }
-  
-  // Famous project name abuse detection
-  const famousNames = ['bitcoin', 'ethereum', 'binance', 'coinbase', 'uniswap', 'chainlink', 'polkadot'];
-  const coinName = coin.name?.toLowerCase() || '';
-  
-  if (famousNames.some(name => coinName.includes(name) && coinName !== name)) {
-    brandPenalty += 40;
-    red_flags.push(`Potential brand abuse of famous project name (-40 points)`);
-  }
-  
-  penalties += brandPenalty;
-  
-  if (facts.security?.risky_language?.some((lang: string) => 
-    lang.toLowerCase().includes("guaranteed returns") || 
-    lang.toLowerCase().includes("guaranteed profit"))) {
-    penalties += 15;
-    red_flags.push("Guaranteed return promises detected (-15 points)");
-  }
-  
-  if (facts.security?.risky_language?.some((lang: string) => 
-    lang.toLowerCase().includes("misleading") || 
-    lang.toLowerCase().includes("false claim"))) {
-    penalties += 10;
-    red_flags.push("Misleading information detected (-10 points)");
-  }
-  
-  if (facts.security?.audit_links?.length === 0 && 
-      facts.security?.owner_controls?.includes("audit claim")) {
+  if (facts.red_flags?.audit_claim_no_source) {
     penalties += 3;
     red_flags.push("Audit claim without source (-3 points)");
   }
   
-  // Green flags
-  if (facts.team?.doxxed === true) green_flags.push("Team is doxxed");
-  if (facts.security?.audit_links?.length > 0) green_flags.push("Security audits found");
-  if (facts.product?.mvp === "yes") green_flags.push("MVP/Demo available");
-  if (facts.tokenomics?.supply && facts.tokenomics.supply !== "unknown") green_flags.push("Tokenomics documented");
-  if (facts.community?.channels?.length > 2) green_flags.push("Active on multiple channels");
+  if (facts.red_flags?.suspected_copycat) {
+    penalties += 7;
+    red_flags.push(`Suspected copycat of ${facts.red_flags.suspected_copycat.brand} (-7 points)`);
+  }
+  
+  // Apply overall cap for misleading claims or contradictions
+  if ((facts.red_flags?.misleading_claims?.length > 0) || (facts.contradictions?.length > 0)) {
+    overall_cap = 20;
+    red_flags.push("Overall score capped at 20 due to misleading/contradictory information");
+  }
+  
+  // Green flags based on claims
+  const auditClaims = (facts.claims || []).filter((c: any) => c.type === 'audit');
+  const doxxedClaims = (facts.claims || []).filter((c: any) => c.type === 'doxxed_team');
+  const mvpClaims = (facts.claims || []).filter((c: any) => c.type === 'mvp');
+  
+  if (auditClaims.length > 0) green_flags.push("Security audits found");
+  if (doxxedClaims.length > 0) green_flags.push("Team is doxxed");
+  if (mvpClaims.some((c: any) => c.value?.toLowerCase().includes('yes'))) green_flags.push("MVP/Demo available");
+  if (facts.on_chain_traction?.partners?.length > 0) green_flags.push("Partnerships documented");
   
   const overall = Object.values(pillars).reduce((sum, score) => sum + score, 0);
   let finalScore = Math.max(overall - penalties, 0);
   
-  // Hard cap for misleading/contradictory information
-  const hasContradictoryInfo = facts.brand_analysis?.misleading_claims?.length > 0 || 
-                              facts.security?.risky_language?.some((lang: string) => 
+  // Apply cap if set
+  if (overall_cap !== null) {
+    finalScore = Math.min(finalScore, overall_cap);
+  }
+  
+  // Calculate confidence based on evidence quality
+  const totalClaims = facts.claims?.length || 0;
+  const claimsWithProof = (facts.claims || []).filter((c: any) => c.proof_urls?.length > 0).length;
+  const coverage = totalClaims > 0 ? claimsWithProof / totalClaims : 0;
+  
+  // Get unique domains from proof URLs
+  const allProofUrls = (facts.claims || []).flatMap((c: any) => c.proof_urls || []);
+  const uniqueDomains = [...new Set(allProofUrls.map((url: string) => {
+    try { return new URL(url).hostname; } catch { return url; }
+  }))].length;
+  const sourceDiversity = Math.min(uniqueDomains / 3, 1);
+  
+  // Simple freshness (assume recent for now)
+  const freshness = 0.8;
+  
+  const confidence = Math.round((0.6 * coverage + 0.2 * sourceDiversity + 0.2 * freshness) * 100) / 100;
+  
+  return {
+    overall: Math.round(finalScore),
+    overall_cap,
+    confidence,
+    pillars,
+    penalties,
+    red_flags,
+    green_flags,
+    confidence_factors: {
+      coverage,
+      source_diversity: sourceDiversity,
+      freshness
+    }
+  };
+}
                                 lang.toLowerCase().includes("misleading") || 
                                 lang.toLowerCase().includes("contradictory"));
   
@@ -1418,6 +1484,158 @@ function calculateSecurityScore(facts: any): number {
                facts.security.owner_controls.toLowerCase().includes("full control")) {
       score -= 10;
   }
+}
+
+// New claims-based scoring functions
+function calculateSecurityScoreFromClaims(securityClaims: any[]): number {
+  let score = 0;
+  
+  // Check for audit claims
+  const auditClaims = securityClaims.filter(c => c.type === 'audit');
+  if (auditClaims.length > 0) {
+    score += 60; // Base score for having audits
+    if (auditClaims.length > 1) score += 20; // Multiple audits bonus
+  }
+  
+  // Check for risk language
+  const riskClaims = securityClaims.filter(c => c.type === 'risk_language');
+  if (riskClaims.length > 0) {
+    score -= 30; // Penalty for risky language
+  }
+  
+  // Check for legal compliance claims
+  const legalClaims = securityClaims.filter(c => c.type === 'legal');
+  if (legalClaims.length > 0) {
+    score += 20; // Bonus for legal compliance
+  }
+  
+  return Math.max(0, Math.min(100, score));
+}
+
+function calculateTokenomicsScoreFromClaims(tokenomicsClaims: any[]): number {
+  let score = 0;
+  
+  // Check for supply information
+  const supplyClaims = tokenomicsClaims.filter(c => c.type === 'supply');
+  if (supplyClaims.length > 0) {
+    score += 40;
+  }
+  
+  // Check for vesting schedule
+  const vestingClaims = tokenomicsClaims.filter(c => c.type === 'vesting');
+  if (vestingClaims.length > 0) {
+    score += 35;
+  }
+  
+  // Bonus for comprehensive tokenomics
+  if (supplyClaims.length > 0 && vestingClaims.length > 0) {
+    score += 25;
+  }
+  
+  return Math.max(0, Math.min(100, score));
+}
+
+function calculateTeamScoreFromClaims(teamClaims: any[]): number {
+  let score = 0;
+  
+  // Check for doxxed team
+  const doxxedClaims = teamClaims.filter(c => c.type === 'doxxed_team');
+  if (doxxedClaims.length > 0) {
+    const isDoxxed = doxxedClaims.some(c => c.value?.toLowerCase().includes('yes') || c.value?.toLowerCase().includes('true'));
+    if (isDoxxed) score += 70;
+  }
+  
+  // Additional team information
+  if (teamClaims.length > 1) {
+    score += 30; // Bonus for detailed team info
+  }
+  
+  return Math.max(0, Math.min(100, score));
+}
+
+function calculateProductScoreFromClaims(productClaims: any[]): number {
+  let score = 0;
+  
+  // Check for MVP
+  const mvpClaims = productClaims.filter(c => c.type === 'mvp');
+  if (mvpClaims.length > 0) {
+    const hasMvp = mvpClaims.some(c => c.value?.toLowerCase().includes('yes'));
+    if (hasMvp) score += 50;
+  }
+  
+  // Check for roadmap
+  const roadmapClaims = productClaims.filter(c => c.type === 'roadmap_date');
+  if (roadmapClaims.length > 0) {
+    score += 30;
+    if (roadmapClaims.length > 2) score += 20; // Detailed roadmap bonus
+  }
+  
+  return Math.max(0, Math.min(100, score));
+}
+
+function calculateTractionScoreFromClaims(tractionClaims: any[], onChainTraction: any): number {
+  let score = 0;
+  
+  // Partners scoring - 0=none, 1-4=progressively more points, ≥3=max
+  const partnerCount = onChainTraction?.partners?.length || 0;
+  if (partnerCount === 1) score += 40;
+  else if (partnerCount === 2) score += 60; 
+  else if (partnerCount === 3) score += 80;
+  else if (partnerCount >= 4) score += 100;
+  
+  // Integrations scoring with quality weighting
+  const integrations = onChainTraction?.integrations || [];
+  integrations.forEach((integration: any) => {
+    if (integration.type === 'infra' || integration.type === 'exchange') {
+      score += 15; // Higher value integrations
+    } else {
+      score += 10; // Standard integrations
+    }
+  });
+  
+  // Additional traction claims
+  const partnerClaims = tractionClaims.filter(c => c.type === 'partner');
+  const integrationClaims = tractionClaims.filter(c => c.type === 'integration');
+  
+  if (partnerClaims.length > 0) score += 20;
+  if (integrationClaims.length > 0) score += 15;
+  
+  return Math.max(0, Math.min(100, score));
+}
+
+function calculateMarketScoreFromClaims(marketClaims: any[]): number {
+  let score = 20; // Base score
+  
+  // Check for competitor analysis
+  const competitorClaims = marketClaims.filter(c => c.type === 'competitor');
+  if (competitorClaims.length > 0) {
+    score += 40;
+  }
+  
+  // Additional market claims
+  if (marketClaims.length > 1) {
+    score += 40; // Bonus for comprehensive market analysis
+  }
+  
+  return Math.max(0, Math.min(100, score));
+}
+
+function calculateCommunityScoreFromClaims(communityClaims: any[]): number {
+  let score = 10; // Base score
+  
+  // Check for channel presence
+  const channelClaims = communityClaims.filter(c => c.type === 'channel');
+  if (channelClaims.length > 0) {
+    score += 30;
+    if (channelClaims.length > 2) score += 30; // Multiple channels bonus
+  }
+  
+  // Additional community information
+  if (communityClaims.length > channelClaims.length) {
+    score += 30; // Bonus for engagement metrics
+  }
+  
+  return Math.max(0, Math.min(100, score));
 }
 
 async function performDeepAnalysis() {

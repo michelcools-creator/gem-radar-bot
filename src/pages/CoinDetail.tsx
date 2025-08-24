@@ -11,6 +11,7 @@ import Navigation from '@/components/Navigation';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ScoreHistoryChart from '@/components/ScoreHistoryChart';
 import AnalysisPipelineFlow from '@/components/AnalysisPipelineFlow';
+import { EvidenceViewer } from '@/components/EvidenceViewer';
 
 const CoinDetail = () => {
   const { id } = useParams();
@@ -233,8 +234,18 @@ const CoinDetail = () => {
             </Card>
           )}
 
+          {/* Evidence Viewer 2.0 - New Claims-based Structure */}
+          {latestFacts?.claims && (
+            <EvidenceViewer
+              claims={latestFacts.claims}
+              redFlags={latestFacts.red_flags || {}}
+              contradictions={latestFacts.contradictions}
+              overallCap={latestScore?.overall_cap}
+            />
+          )}
+
           {/* Extracted Facts */}
-          {latestFacts && (
+          {latestFacts && !latestFacts.claims && (
             <Card>
               <CardHeader>
                 <CardTitle>Extracted Information</CardTitle>
