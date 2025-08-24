@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
-import { AlertCircle, TrendingUp, RefreshCw, ExternalLink, Search } from 'lucide-react';
+import { AlertCircle, TrendingUp, RefreshCw, ExternalLink, Search, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Link } from 'react-router-dom';
 import Navigation from '@/components/Navigation';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -34,6 +35,7 @@ const Dashboard = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [manualUrl, setManualUrl] = useState('');
   const [isAnalyzingManual, setIsAnalyzingManual] = useState(false);
+  const [deletingCoinId, setDeletingCoinId] = useState<string | null>(null);
 
   const { data: coins, isLoading } = useQuery({
     queryKey: ['coins'],
@@ -133,6 +135,38 @@ const Dashboard = () => {
 
     analyzeManualCoin.mutate(manualUrl);
   };
+
+  const deleteCoin = useMutation({
+    mutationFn: async (coinId: string) => {
+      setDeletingCoinId(coinId);
+      
+      // Delete related data first (scores, facts, pages)
+      await supabase.from('scores').delete().eq('coin_id', coinId);
+      await supabase.from('facts').delete().eq('coin_id', coinId);
+      await supabase.from('pages').delete().eq('coin_id', coinId);
+      
+      // Then delete the coin
+      const { error } = await supabase.from('coins').delete().eq('id', coinId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Coin Deleted",
+        description: "The coin and all related data have been removed.",
+      });
+      queryClient.invalidateQueries({ queryKey: ['coins'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Delete Error",
+        description: error.message || "Failed to delete coin",
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      setDeletingCoinId(null);
+    }
+  });
 
   const getStatusColor = (status: string) => {
     const colors = {
@@ -377,13 +411,46 @@ const Dashboard = () => {
                         </div>
                       </td>
                       
-                      <td className="py-3 px-4">
-                        <Link to={`/coin/${coin.id}`}>
-                          <Button variant="ghost" size="sm" className="hover:bg-primary/10">
-                            <ExternalLink className="w-4 h-4" />
-                          </Button>
-                        </Link>
-                      </td>
+                       <td className="py-3 px-4">
+                         <div className="flex gap-1">
+                           <Link to={`/coin/${coin.id}`}>
+                             <Button variant="ghost" size="sm" className="hover:bg-primary/10">
+                               <ExternalLink className="w-4 h-4" />
+                             </Button>
+                           </Link>
+                           
+                           <AlertDialog>
+                             <AlertDialogTrigger asChild>
+                               <Button 
+                                 variant="ghost" 
+                                 size="sm" 
+                                 className="hover:bg-destructive/10 hover:text-destructive"
+                                 disabled={deletingCoinId === coin.id}
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </Button>
+                             </AlertDialogTrigger>
+                             <AlertDialogContent>
+                               <AlertDialogHeader>
+                                 <AlertDialogTitle>Verwijder {coin.name}</AlertDialogTitle>
+                                 <AlertDialogDescription>
+                                   Weet je zeker dat je deze coin wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt. 
+                                   Alle gerelateerde scores, feiten en pagina's worden ook verwijderd.
+                                 </AlertDialogDescription>
+                               </AlertDialogHeader>
+                               <AlertDialogFooter>
+                                 <AlertDialogCancel>Annuleren</AlertDialogCancel>
+                                 <AlertDialogAction
+                                   onClick={() => deleteCoin.mutate(coin.id)}
+                                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                 >
+                                   Verwijderen
+                                 </AlertDialogAction>
+                               </AlertDialogFooter>
+                             </AlertDialogContent>
+                           </AlertDialog>
+                         </div>
+                       </td>
                     </tr>
                   );
                 })}
