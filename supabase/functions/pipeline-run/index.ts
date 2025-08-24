@@ -88,6 +88,9 @@ serve(async (req) => {
     // Step 5: Calculate scores
     await calculateScores();
     
+    // Step 6: Perform deep analysis
+    await performDeepAnalysis();
+    
     console.log('Pipeline run completed successfully');
     
     return new Response(JSON.stringify({ success: true }), {
@@ -1253,7 +1256,7 @@ async function calculateScores() {
       
       await supabase
         .from('coins')
-        .update({ status: 'analyzed' })
+        .update({ status: 'deep_analysis_pending' })
         .eq('id', coin.id);
         
       console.log(`Scored ${coin.name}: ${scores.overall}`);
@@ -1414,8 +1417,231 @@ function calculateSecurityScore(facts: any): number {
     } else if (facts.security.owner_controls.toLowerCase().includes("unlimited") ||
                facts.security.owner_controls.toLowerCase().includes("full control")) {
       score -= 10;
+  }
+}
+
+async function performDeepAnalysis() {
+  // Get coins that are ready for deep analysis
+  const { data: coinsForDeepAnalysis, error } = await supabase
+    .from('coins')
+    .select(`
+      *,
+      facts!inner(*),
+      scores!inner(*),
+      pages(*)
+    `)
+    .eq('status', 'deep_analysis_pending')
+    .order('updated_at', { ascending: true })
+    .limit(2); // Limit to 2 at a time to respect rate limits
+
+  if (error) {
+    console.error('Error fetching coins for deep analysis:', error);
+    return;
+  }
+
+  if (!coinsForDeepAnalysis?.length) {
+    console.log('No coins ready for deep analysis');
+    return;
+  }
+
+  console.log(`Found ${coinsForDeepAnalysis.length} coins ready for deep analysis`);
+
+  for (const coin of coinsForDeepAnalysis) {
+    try {
+      console.log(`Starting deep analysis for ${coin.name}...`);
+      
+      const facts = coin.facts[0]?.extracted as any;
+      const scores = coin.scores[0]?.pillars as any;
+      const pages = coin.pages || [];
+      
+      // Prepare comprehensive context for deep analysis
+      const contextData = {
+        coin: {
+          name: coin.name,
+          symbol: coin.symbol,
+          official_links: coin.official_links
+        },
+        facts,
+        scores,
+        pages: pages.map(p => ({
+          url: p.url,
+          content_excerpt: p.content_excerpt?.substring(0, 1000) // Limit content
+        }))
+      };
+
+      const deepAnalysisPrompt = `
+You are a professional cryptocurrency researcher conducting an in-depth investigation. Analyze the following cryptocurrency comprehensively and provide detailed findings in JSON format.
+
+COIN DATA:
+${JSON.stringify(contextData, null, 2)}
+
+Perform a deep dive analysis covering these areas:
+
+1. TEAM_DEEP_DIVE: Research each team member thoroughly
+   - Verify LinkedIn profiles and professional backgrounds
+   - Check previous projects and their outcomes
+   - Identify any red flags in team history
+   - Rate team credibility (1-100)
+
+2. PARTNERSHIP_ANALYSIS: Validate all claimed partnerships
+   - Verify if partnerships are real or just marketing claims
+   - Check mutual confirmation from partner companies
+   - Assess partnership quality and strategic value
+   - Rate partnership legitimacy (1-100)
+
+3. COMPETITOR_ANALYSIS: Compare with market competitors
+   - Identify direct and indirect competitors
+   - Compare technology, team, and market position
+   - Assess competitive advantages and disadvantages
+   - Rate competitive position (1-100)
+
+4. RED_FLAG_ANALYSIS: Deep investigation for warning signs
+   - Check for copycat behavior or plagiarized content
+   - Look for unrealistic claims or promises
+   - Verify technical claims and roadmap feasibility
+   - Identify potential rug pull indicators
+   - Overall risk assessment (1-100, where 100 = highest risk)
+
+5. SOCIAL_SENTIMENT: Analyze community and social presence
+   - Check for fake followers or bot activity
+   - Assess genuine community engagement
+   - Monitor sentiment trends and discussions
+   - Rate social authenticity (1-100)
+
+6. FINANCIAL_DEEP_DIVE: Advanced tokenomics analysis
+   - Analyze token distribution and whale wallets
+   - Check for unusual trading patterns
+   - Verify locked liquidity and vesting schedules
+   - Assess financial transparency
+   - Rate financial health (1-100)
+
+Return ONLY a valid JSON object with this exact structure:
+{
+  "team_deep_dive": {
+    "analysis": "detailed analysis text",
+    "credibility_score": 0,
+    "key_findings": ["finding1", "finding2"],
+    "red_flags": ["flag1", "flag2"]
+  },
+  "partnership_analysis": {
+    "analysis": "detailed analysis text",
+    "legitimacy_score": 0,
+    "verified_partnerships": ["partner1", "partner2"],
+    "questionable_claims": ["claim1", "claim2"]
+  },
+  "competitor_analysis": {
+    "analysis": "detailed analysis text",
+    "competitive_score": 0,
+    "main_competitors": ["comp1", "comp2"],
+    "advantages": ["adv1", "adv2"],
+    "disadvantages": ["dis1", "dis2"]
+  },
+  "red_flag_analysis": {
+    "analysis": "detailed analysis text",
+    "risk_score": 0,
+    "critical_flags": ["flag1", "flag2"],
+    "minor_concerns": ["concern1", "concern2"]
+  },
+  "social_sentiment": {
+    "analysis": "detailed analysis text",
+    "authenticity_score": 0,
+    "engagement_quality": "high/medium/low",
+    "sentiment_trend": "positive/neutral/negative"
+  },
+  "financial_deep_dive": {
+    "analysis": "detailed analysis text",
+    "health_score": 0,
+    "transparency_rating": "high/medium/low",
+    "risk_factors": ["risk1", "risk2"]
+  }
+}`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-5-2025-08-07', // Use GPT-5 for deep analysis
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a professional cryptocurrency researcher and due diligence expert. Provide thorough, factual analysis based on available data. Always return valid JSON format.'
+            },
+            {
+              role: 'user',
+              content: deepAnalysisPrompt
+            }
+          ],
+          max_completion_tokens: 4000
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('OpenAI API error:', errorData);
+        throw new Error(`OpenAI API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const analysisText = data.choices[0].message.content;
+      
+      let deepAnalysisData;
+      try {
+        deepAnalysisData = JSON.parse(analysisText);
+      } catch (parseError) {
+        console.error('Failed to parse deep analysis JSON:', parseError);
+        console.log('Raw response:', analysisText);
+        throw new Error('Failed to parse deep analysis response');
+      }
+
+      // Store deep analysis in database
+      const { error: insertError } = await supabase
+        .from('deep_analysis')
+        .insert({
+          coin_id: coin.id,
+          team_deep_dive: deepAnalysisData.team_deep_dive,
+          partnership_analysis: deepAnalysisData.partnership_analysis,
+          competitor_analysis: deepAnalysisData.competitor_analysis,
+          red_flag_analysis: deepAnalysisData.red_flag_analysis,
+          social_sentiment: deepAnalysisData.social_sentiment,
+          financial_deep_dive: deepAnalysisData.financial_deep_dive
+        });
+
+      if (insertError) {
+        console.error('Error inserting deep analysis:', insertError);
+        throw insertError;
+      }
+
+      // Update coin status to analyzed (final status)
+      await supabase
+        .from('coins')
+        .update({ 
+          status: 'analyzed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', coin.id);
+
+      console.log(`Deep analysis completed for ${coin.name}`);
+      
+      // Small delay to respect rate limits
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+    } catch (error) {
+      console.error(`Error in deep analysis for ${coin.name}:`, error);
+      
+      // Mark coin as analyzed even if deep analysis fails
+      await supabase
+        .from('coins')
+        .update({ 
+          status: 'analyzed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', coin.id);
     }
   }
+}
   
   // Deduct for risky language
   if (facts.security.risky_language && facts.security.risky_language.length > 0) {
@@ -1618,4 +1844,227 @@ function calculateCommunityScore(facts: any): number {
   }
   
   return Math.min(100, score);
+}
+
+async function performDeepAnalysis() {
+  // Get coins that are ready for deep analysis
+  const { data: coinsForDeepAnalysis, error } = await supabase
+    .from('coins')
+    .select(`
+      *,
+      facts!inner(*),
+      scores!inner(*),
+      pages(*)
+    `)
+    .eq('status', 'deep_analysis_pending')
+    .order('updated_at', { ascending: true })
+    .limit(2); // Limit to 2 at a time to respect rate limits
+
+  if (error) {
+    console.error('Error fetching coins for deep analysis:', error);
+    return;
+  }
+
+  if (!coinsForDeepAnalysis?.length) {
+    console.log('No coins ready for deep analysis');
+    return;
+  }
+
+  console.log(`Found ${coinsForDeepAnalysis.length} coins ready for deep analysis`);
+
+  for (const coin of coinsForDeepAnalysis) {
+    try {
+      console.log(`Starting deep analysis for ${coin.name}...`);
+      
+      const facts = coin.facts[0]?.extracted as any;
+      const scores = coin.scores[0]?.pillars as any;
+      const pages = coin.pages || [];
+      
+      // Prepare comprehensive context for deep analysis
+      const contextData = {
+        coin: {
+          name: coin.name,
+          symbol: coin.symbol,
+          official_links: coin.official_links
+        },
+        facts,
+        scores,
+        pages: pages.map(p => ({
+          url: p.url,
+          content_excerpt: p.content_excerpt?.substring(0, 1000) // Limit content
+        }))
+      };
+
+      const deepAnalysisPrompt = `
+You are a professional cryptocurrency researcher conducting an in-depth investigation. Analyze the following cryptocurrency comprehensively and provide detailed findings in JSON format.
+
+COIN DATA:
+${JSON.stringify(contextData, null, 2)}
+
+Perform a deep dive analysis covering these areas:
+
+1. TEAM_DEEP_DIVE: Research each team member thoroughly
+   - Verify LinkedIn profiles and professional backgrounds
+   - Check previous projects and their outcomes
+   - Identify any red flags in team history
+   - Rate team credibility (1-100)
+
+2. PARTNERSHIP_ANALYSIS: Validate all claimed partnerships
+   - Verify if partnerships are real or just marketing claims
+   - Check mutual confirmation from partner companies
+   - Assess partnership quality and strategic value
+   - Rate partnership legitimacy (1-100)
+
+3. COMPETITOR_ANALYSIS: Compare with market competitors
+   - Identify direct and indirect competitors
+   - Compare technology, team, and market position
+   - Assess competitive advantages and disadvantages
+   - Rate competitive position (1-100)
+
+4. RED_FLAG_ANALYSIS: Deep investigation for warning signs
+   - Check for copycat behavior or plagiarized content
+   - Look for unrealistic claims or promises
+   - Verify technical claims and roadmap feasibility
+   - Identify potential rug pull indicators
+   - Overall risk assessment (1-100, where 100 = highest risk)
+
+5. SOCIAL_SENTIMENT: Analyze community and social presence
+   - Check for fake followers or bot activity
+   - Assess genuine community engagement
+   - Monitor sentiment trends and discussions
+   - Rate social authenticity (1-100)
+
+6. FINANCIAL_DEEP_DIVE: Advanced tokenomics analysis
+   - Analyze token distribution and whale wallets
+   - Check for unusual trading patterns
+   - Verify locked liquidity and vesting schedules
+   - Assess financial transparency
+   - Rate financial health (1-100)
+
+Return ONLY a valid JSON object with this exact structure:
+{
+  "team_deep_dive": {
+    "analysis": "detailed analysis text",
+    "credibility_score": 0,
+    "key_findings": ["finding1", "finding2"],
+    "red_flags": ["flag1", "flag2"]
+  },
+  "partnership_analysis": {
+    "analysis": "detailed analysis text",
+    "legitimacy_score": 0,
+    "verified_partnerships": ["partner1", "partner2"],
+    "questionable_claims": ["claim1", "claim2"]
+  },
+  "competitor_analysis": {
+    "analysis": "detailed analysis text",
+    "competitive_score": 0,
+    "main_competitors": ["comp1", "comp2"],
+    "advantages": ["adv1", "adv2"],
+    "disadvantages": ["dis1", "dis2"]
+  },
+  "red_flag_analysis": {
+    "analysis": "detailed analysis text",
+    "risk_score": 0,
+    "critical_flags": ["flag1", "flag2"],
+    "minor_concerns": ["concern1", "concern2"]
+  },
+  "social_sentiment": {
+    "analysis": "detailed analysis text",
+    "authenticity_score": 0,
+    "engagement_quality": "high/medium/low",
+    "sentiment_trend": "positive/neutral/negative"
+  },
+  "financial_deep_dive": {
+    "analysis": "detailed analysis text",
+    "health_score": 0,
+    "transparency_rating": "high/medium/low",
+    "risk_factors": ["risk1", "risk2"]
+  }
+}`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-5-2025-08-07', // Use GPT-5 for deep analysis
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a professional cryptocurrency researcher and due diligence expert. Provide thorough, factual analysis based on available data. Always return valid JSON format.'
+            },
+            {
+              role: 'user',
+              content: deepAnalysisPrompt
+            }
+          ],
+          max_completion_tokens: 4000
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('OpenAI API error:', errorData);
+        throw new Error(`OpenAI API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const analysisText = data.choices[0].message.content;
+      
+      let deepAnalysisData;
+      try {
+        deepAnalysisData = JSON.parse(analysisText);
+      } catch (parseError) {
+        console.error('Failed to parse deep analysis JSON:', parseError);
+        console.log('Raw response:', analysisText);
+        throw new Error('Failed to parse deep analysis response');
+      }
+
+      // Store deep analysis in database
+      const { error: insertError } = await supabase
+        .from('deep_analysis')
+        .insert({
+          coin_id: coin.id,
+          team_deep_dive: deepAnalysisData.team_deep_dive,
+          partnership_analysis: deepAnalysisData.partnership_analysis,
+          competitor_analysis: deepAnalysisData.competitor_analysis,
+          red_flag_analysis: deepAnalysisData.red_flag_analysis,
+          social_sentiment: deepAnalysisData.social_sentiment,
+          financial_deep_dive: deepAnalysisData.financial_deep_dive
+        });
+
+      if (insertError) {
+        console.error('Error inserting deep analysis:', insertError);
+        throw insertError;
+      }
+
+      // Update coin status to analyzed (final status)
+      await supabase
+        .from('coins')
+        .update({ 
+          status: 'analyzed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', coin.id);
+
+      console.log(`Deep analysis completed for ${coin.name}`);
+      
+      // Small delay to respect rate limits
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+    } catch (error) {
+      console.error(`Error in deep analysis for ${coin.name}:`, error);
+      
+      // Mark coin as analyzed even if deep analysis fails
+      await supabase
+        .from('coins')
+        .update({ 
+          status: 'analyzed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', coin.id);
+    }
+  }
 }

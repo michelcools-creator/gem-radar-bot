@@ -10,7 +10,7 @@ import {
   Position,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { CheckCircle, Clock, AlertCircle, Search, FileText, Brain, Calculator, Trophy } from 'lucide-react';
+import { CheckCircle, Clock, AlertCircle, Search, FileText, Brain, Calculator, Trophy, Plus, Link, Download, BarChart3, CircleDot } from 'lucide-react';
 
 interface AnalysisPipelineFlowProps {
   coinData: {
@@ -19,13 +19,15 @@ interface AnalysisPipelineFlowProps {
     pages?: Array<{ status: string }>;
     facts?: Array<any>;
     scores?: Array<any>;
+    deep_analysis?: Array<any>;
   };
 }
 
 const AnalysisPipelineFlow: React.FC<AnalysisPipelineFlowProps> = ({ coinData }) => {
   // Determine pipeline stage based on coin data
   const getCurrentStage = () => {
-    if (coinData.status === 'analyzed' && coinData.scores?.length > 0) return 6;
+    if (coinData.status === 'analyzed' && coinData.deep_analysis?.length > 0) return 7;
+    if (coinData.status === 'deep_analysis_pending' && coinData.scores?.length > 0) return 6;
     if (coinData.scores?.length > 0) return 5;
     if (coinData.facts?.length > 0) return 4;
     if (coinData.pages?.some(p => p.status === 'fetched')) return 3;
@@ -70,12 +72,13 @@ const AnalysisPipelineFlow: React.FC<AnalysisPipelineFlowProps> = ({ coinData })
 
   const getStageIcon = (stageNumber: number) => {
     const icons = {
-      1: <Search className="w-4 h-4" />,
-      2: <Search className="w-4 h-4" />,
-      3: <FileText className="w-4 h-4" />,
+      1: <Plus className="w-4 h-4" />,
+      2: <Link className="w-4 h-4" />,
+      3: <Download className="w-4 h-4" />,
       4: <Brain className="w-4 h-4" />,
-      5: <Calculator className="w-4 h-4" />,
-      6: <Trophy className="w-4 h-4" />,
+      5: <BarChart3 className="w-4 h-4" />,
+      6: <Search className="w-4 h-4" />,
+      7: <CheckCircle className="w-4 h-4" />,
     };
     return icons[stageNumber as keyof typeof icons];
   };
@@ -205,7 +208,7 @@ const AnalysisPipelineFlow: React.FC<AnalysisPipelineFlowProps> = ({ coinData })
           <div className="flex flex-col items-center gap-2 p-3">
             <div className="flex items-center gap-2">
               {getStageIcon(6)}
-              <span className="text-sm font-medium">Complete</span>
+              <span className="text-sm font-medium">Deep Analysis</span>
             </div>
             {getNodeIcon(6)}
           </div>
@@ -213,6 +216,29 @@ const AnalysisPipelineFlow: React.FC<AnalysisPipelineFlowProps> = ({ coinData })
       },
       style: {
         ...getNodeStyle(6),
+        minWidth: 120,
+        borderRadius: 12,
+      },
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+    },
+    {
+      id: '7',
+      type: 'default',
+      position: { x: 1070, y: 100 },
+      data: {
+        label: (
+          <div className="flex flex-col items-center gap-2 p-3">
+            <div className="flex items-center gap-2">
+              {getStageIcon(7)}
+              <span className="text-sm font-medium">Complete</span>
+            </div>
+            {getNodeIcon(7)}
+          </div>
+        ),
+      },
+      style: {
+        ...getNodeStyle(7),
         minWidth: 120,
         borderRadius: 12,
       },
@@ -260,6 +286,14 @@ const AnalysisPipelineFlow: React.FC<AnalysisPipelineFlowProps> = ({ coinData })
       type: 'smoothstep',
       animated: currentStage === 6,
       style: { stroke: currentStage > 5 ? '#22c55e' : '#d1d5db', strokeWidth: 3 },
+    },
+    {
+      id: 'e6-7',
+      source: '6',
+      target: '7',
+      type: 'smoothstep',
+      animated: currentStage === 7,
+      style: { stroke: currentStage > 6 ? '#22c55e' : '#d1d5db', strokeWidth: 3 },
     },
   ];
 

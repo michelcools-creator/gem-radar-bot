@@ -101,6 +101,53 @@ export type Database = {
         }
         Relationships: []
       }
+      deep_analysis: {
+        Row: {
+          coin_id: string
+          competitor_analysis: Json | null
+          created_at: string
+          financial_deep_dive: Json | null
+          id: string
+          partnership_analysis: Json | null
+          red_flag_analysis: Json | null
+          social_sentiment: Json | null
+          team_deep_dive: Json | null
+          updated_at: string
+        }
+        Insert: {
+          coin_id: string
+          competitor_analysis?: Json | null
+          created_at?: string
+          financial_deep_dive?: Json | null
+          id?: string
+          partnership_analysis?: Json | null
+          red_flag_analysis?: Json | null
+          social_sentiment?: Json | null
+          team_deep_dive?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          coin_id?: string
+          competitor_analysis?: Json | null
+          created_at?: string
+          financial_deep_dive?: Json | null
+          id?: string
+          partnership_analysis?: Json | null
+          red_flag_analysis?: Json | null
+          social_sentiment?: Json | null
+          team_deep_dive?: Json | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deep_analysis_coin_id_fkey"
+            columns: ["coin_id"]
+            isOneToOne: false
+            referencedRelation: "coins"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       facts: {
         Row: {
           as_of: string
@@ -421,6 +468,7 @@ export type Database = {
         | "failed"
         | "insufficient_data"
         | "retry_pending"
+        | "deep_analysis_pending"
       page_status:
         | "pending"
         | "fetched"
@@ -562,6 +610,7 @@ export const Constants = {
         "failed",
         "insufficient_data",
         "retry_pending",
+        "deep_analysis_pending",
       ],
       page_status: [
         "pending",

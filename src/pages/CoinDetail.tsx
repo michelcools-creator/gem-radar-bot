@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { ArrowLeft, ExternalLink, Users, Shield, Rocket, TrendingUp, MessageCircle, Coins } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Users, Shield, Rocket, TrendingUp, MessageCircle, Coins, AlertCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import Navigation from '@/components/Navigation';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -25,7 +25,8 @@ const CoinDetail = () => {
           *,
           scores(*),
           facts(*),
-          pages(*)
+          pages(*),
+          deep_analysis(*)
         `)
         .eq('id', id)
         .single();
@@ -77,6 +78,7 @@ const CoinDetail = () => {
 
   const latestScore = coinData.scores?.[0];
   const latestFacts = coinData.facts?.[0]?.extracted as any;
+  const latestDeepAnalysis = coinData.deep_analysis?.[0] as any;
   const officialLinks = coinData.official_links as Record<string, string>;
 
   const getPillarIcon = (pillar: string) => {
@@ -298,6 +300,183 @@ const CoinDetail = () => {
                             <strong>{item.milestone}</strong> - {item.date}
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Deep Analysis Results */}
+          {latestDeepAnalysis && (
+            <Card>
+              <CardHeader>
+                <CardTitle>🔍 Deep Dive Analysis</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Comprehensive research and due diligence findings
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-6">
+                  
+                  {/* Team Deep Dive */}
+                  {latestDeepAnalysis.team_deep_dive && (
+                    <div>
+                      <h4 className="font-semibold mb-2 flex items-center gap-2">
+                        <Users className="w-4 h-4" />
+                        Team Analysis (Credibility: {latestDeepAnalysis.team_deep_dive.credibility_score}/100)
+                      </h4>
+                      <div className="ml-6 space-y-2">
+                        <p className="text-sm">{latestDeepAnalysis.team_deep_dive.analysis}</p>
+                        {latestDeepAnalysis.team_deep_dive.key_findings?.length > 0 && (
+                          <div>
+                            <strong className="text-sm">Key Findings:</strong>
+                            <ul className="list-disc list-inside text-sm ml-2 space-y-1">
+                              {latestDeepAnalysis.team_deep_dive.key_findings.map((finding: string, i: number) => (
+                                <li key={i}>{finding}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {latestDeepAnalysis.team_deep_dive.red_flags?.length > 0 && (
+                          <div>
+                            <strong className="text-sm text-red-600">Red Flags:</strong>
+                            <ul className="list-disc list-inside text-sm ml-2 space-y-1 text-red-600">
+                              {latestDeepAnalysis.team_deep_dive.red_flags.map((flag: string, i: number) => (
+                                <li key={i}>{flag}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Partnership Analysis */}
+                  {latestDeepAnalysis.partnership_analysis && (
+                    <div>
+                      <h4 className="font-semibold mb-2 flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4" />
+                        Partnership Analysis (Legitimacy: {latestDeepAnalysis.partnership_analysis.legitimacy_score}/100)
+                      </h4>
+                      <div className="ml-6 space-y-2">
+                        <p className="text-sm">{latestDeepAnalysis.partnership_analysis.analysis}</p>
+                        {latestDeepAnalysis.partnership_analysis.verified_partnerships?.length > 0 && (
+                          <div>
+                            <strong className="text-sm text-green-600">Verified Partnerships:</strong>
+                            <ul className="list-disc list-inside text-sm ml-2 space-y-1 text-green-600">
+                              {latestDeepAnalysis.partnership_analysis.verified_partnerships.map((partner: string, i: number) => (
+                                <li key={i}>{partner}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {latestDeepAnalysis.partnership_analysis.questionable_claims?.length > 0 && (
+                          <div>
+                            <strong className="text-sm text-yellow-600">Questionable Claims:</strong>
+                            <ul className="list-disc list-inside text-sm ml-2 space-y-1 text-yellow-600">
+                              {latestDeepAnalysis.partnership_analysis.questionable_claims.map((claim: string, i: number) => (
+                                <li key={i}>{claim}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Competitor Analysis */}
+                  {latestDeepAnalysis.competitor_analysis && (
+                    <div>
+                      <h4 className="font-semibold mb-2 flex items-center gap-2">
+                        <Shield className="w-4 h-4" />
+                        Competitor Analysis (Position: {latestDeepAnalysis.competitor_analysis.competitive_score}/100)
+                      </h4>
+                      <div className="ml-6 space-y-2">
+                        <p className="text-sm">{latestDeepAnalysis.competitor_analysis.analysis}</p>
+                        {latestDeepAnalysis.competitor_analysis.main_competitors?.length > 0 && (
+                          <p className="text-sm">
+                            <strong>Main Competitors:</strong> {latestDeepAnalysis.competitor_analysis.main_competitors.join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Red Flag Analysis */}
+                  {latestDeepAnalysis.red_flag_analysis && (
+                    <div>
+                      <h4 className="font-semibold mb-2 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-red-500" />
+                        Risk Assessment (Risk Score: {latestDeepAnalysis.red_flag_analysis.risk_score}/100)
+                      </h4>
+                      <div className="ml-6 space-y-2">
+                        <p className="text-sm">{latestDeepAnalysis.red_flag_analysis.analysis}</p>
+                        {latestDeepAnalysis.red_flag_analysis.critical_flags?.length > 0 && (
+                          <div>
+                            <strong className="text-sm text-red-600">Critical Flags:</strong>
+                            <ul className="list-disc list-inside text-sm ml-2 space-y-1 text-red-600">
+                              {latestDeepAnalysis.red_flag_analysis.critical_flags.map((flag: string, i: number) => (
+                                <li key={i}>{flag}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {latestDeepAnalysis.red_flag_analysis.minor_concerns?.length > 0 && (
+                          <div>
+                            <strong className="text-sm text-yellow-600">Minor Concerns:</strong>
+                            <ul className="list-disc list-inside text-sm ml-2 space-y-1 text-yellow-600">
+                              {latestDeepAnalysis.red_flag_analysis.minor_concerns.map((concern: string, i: number) => (
+                                <li key={i}>{concern}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Social Sentiment */}
+                  {latestDeepAnalysis.social_sentiment && (
+                    <div>
+                      <h4 className="font-semibold mb-2 flex items-center gap-2">
+                        <MessageCircle className="w-4 h-4" />
+                        Social Sentiment (Authenticity: {latestDeepAnalysis.social_sentiment.authenticity_score}/100)
+                      </h4>
+                      <div className="ml-6 space-y-2">
+                        <p className="text-sm">{latestDeepAnalysis.social_sentiment.analysis}</p>
+                        <div className="flex gap-4 text-sm">
+                          <span><strong>Engagement:</strong> {latestDeepAnalysis.social_sentiment.engagement_quality}</span>
+                          <span><strong>Trend:</strong> {latestDeepAnalysis.social_sentiment.sentiment_trend}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Financial Deep Dive */}
+                  {latestDeepAnalysis.financial_deep_dive && (
+                    <div>
+                      <h4 className="font-semibold mb-2 flex items-center gap-2">
+                        <Coins className="w-4 h-4" />
+                        Financial Analysis (Health: {latestDeepAnalysis.financial_deep_dive.health_score}/100)
+                      </h4>
+                      <div className="ml-6 space-y-2">
+                        <p className="text-sm">{latestDeepAnalysis.financial_deep_dive.analysis}</p>
+                        <div className="flex gap-4 text-sm">
+                          <span><strong>Transparency:</strong> {latestDeepAnalysis.financial_deep_dive.transparency_rating}</span>
+                        </div>
+                        {latestDeepAnalysis.financial_deep_dive.risk_factors?.length > 0 && (
+                          <div>
+                            <strong className="text-sm text-orange-600">Risk Factors:</strong>
+                            <ul className="list-disc list-inside text-sm ml-2 space-y-1 text-orange-600">
+                              {latestDeepAnalysis.financial_deep_dive.risk_factors.map((risk: string, i: number) => (
+                                <li key={i}>{risk}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
