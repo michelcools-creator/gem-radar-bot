@@ -87,13 +87,20 @@ async function discoverRecentListings() {
     // Rate limiting: wait between requests
     await new Promise(resolve => setTimeout(resolve, 1000));
     
-    // Web-only mode: scrape the new cryptocurrencies page with proper compliance
+    // Web-only mode: scrape the new cryptocurrencies page with better stealth
     const response = await fetch('https://www.coingecko.com/en/new-cryptocurrencies', {
       headers: {
-        'User-Agent': 'NewCoinRadarResearchBot/1.0 (contact: research@newcoinradar.dev)',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'close',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': 'https://www.coingecko.com/',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Cache-Control': 'max-age=0',
       },
     });
     
@@ -107,9 +114,11 @@ async function discoverRecentListings() {
     }
     
     const html = await response.text();
+    console.log(`Response HTML length: ${html.length} characters`);
+    
     const coins = parseCoinGeckoListings(html);
     
-    console.log(`Found ${coins.length} new coins`);
+    console.log(`Found ${coins.length} new coins from CoinGecko new cryptocurrencies page`);
     
     // Upsert coins
     for (const coin of coins) {
@@ -137,29 +146,82 @@ async function discoverRecentListings() {
 }
 
 function parseCoinGeckoListings(html: string): Array<{name: string, symbol: string, coinUrl: string}> {
-  // Simple regex-based parsing for the table rows
   const coins = [];
   
-  // Look for table rows with coin data
-  const tableRowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/g;
-  const rows = html.match(tableRowRegex) || [];
-  
-  for (const row of rows) {
-    // Extract coin name, symbol, and detail URL
-    const nameMatch = row.match(/title="([^"]+)"/);
-    const symbolMatch = row.match(/class="tw-uppercase[^>]*>([A-Z0-9]+)</);
-    const urlMatch = row.match(/href="(\/en\/coins\/[^"]+)"/);
+  try {
+    // Multiple parsing strategies for better reliability
     
-    if (nameMatch && symbolMatch && urlMatch) {
-      coins.push({
-        name: nameMatch[1],
-        symbol: symbolMatch[1],
-        coinUrl: `https://www.coingecko.com${urlMatch[1]}`
-      });
+    // Strategy 1: Look for coin links in the new cryptocurrencies table
+    const coinLinkRegex = /<a[^>]*href="(\/en\/coins\/[^"]+)"[^>]*>([^<]+)<\/a>/g;
+    let match;
+    
+    while ((match = coinLinkRegex.exec(html)) !== null) {
+      const coinUrl = `https://www.coingecko.com${match[1]}`;
+      const nameOrSymbol = match[2].trim();
+      
+      // Try to extract symbol from nearby elements
+      const coinId = match[1].split('/').pop();
+      
+      if (coinId && nameOrSymbol) {
+        coins.push({
+          name: nameOrSymbol,
+          symbol: nameOrSymbol.toUpperCase(), // Will be refined later
+          coinUrl: coinUrl
+        });
+      }
     }
+    
+    // Strategy 2: Look for table rows with structured data
+    if (coins.length === 0) {
+      const tableRowRegex = /<tr[^>]*class="[^"]*hover[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
+      const rows = html.match(tableRowRegex) || [];
+      
+      for (const row of rows) {
+        // Look for coin names and symbols
+        const nameMatch = row.match(/title="([^"]+)"/);
+        const symbolMatch = row.match(/class="[^"]*tw-uppercase[^"]*"[^>]*>([A-Z0-9]+)</i);
+        const urlMatch = row.match(/href="(\/en\/coins\/[^"]+)"/);
+        
+        if (nameMatch && symbolMatch && urlMatch) {
+          coins.push({
+            name: nameMatch[1],
+            symbol: symbolMatch[1],
+            coinUrl: `https://www.coingecko.com${urlMatch[1]}`
+          });
+        }
+      }
+    }
+    
+    // Strategy 3: Fallback - look for any coin URLs and extract IDs
+    if (coins.length === 0) {
+      const fallbackRegex = /\/en\/coins\/([^\/"\s]+)/g;
+      const uniqueCoins = new Set();
+      
+      while ((match = fallbackRegex.exec(html)) !== null) {
+        const coinId = match[1];
+        if (!uniqueCoins.has(coinId)) {
+          uniqueCoins.add(coinId);
+          coins.push({
+            name: coinId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            symbol: coinId.toUpperCase().replace(/-/g, ''),
+            coinUrl: `https://www.coingecko.com/en/coins/${coinId}`
+          });
+        }
+      }
+    }
+    
+    console.log(`Parsing strategies found ${coins.length} coins total`);
+    
+  } catch (error) {
+    console.error('Error parsing CoinGecko listings:', error);
   }
   
-  return coins.slice(0, 50); // Limit to 50 most recent
+  // Remove duplicates by URL and limit results
+  const uniqueCoins = Array.from(
+    new Map(coins.map(coin => [coin.coinUrl, coin])).values()
+  );
+  
+  return uniqueCoins.slice(0, 50); // Limit to 50 most recent
 }
 
 async function resolveOfficialLinks() {
