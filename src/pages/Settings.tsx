@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Save, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Save, RefreshCw, CheckCircle, Key } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
 import { Link } from 'react-router-dom';
@@ -350,18 +350,37 @@ const Settings = () => {
           </CardHeader>
           <CardContent>
             <div>
-              <Label htmlFor="chatgpt_pro_api_key">ChatGPT Pro API Key (Optional)</Label>
-              <Input
-                id="chatgpt_pro_api_key"
-                type="password"
-                value={formData.chatgpt_pro_api_key}
-                onChange={(e) => setFormData(prev => ({ ...prev, chatgpt_pro_api_key: e.target.value }))}
-                placeholder="sk-proj-..."
-                className="mt-1"
-              />
+              <div className="flex items-center gap-2 mb-2">
+                <Label htmlFor="chatgpt_pro_api_key">ChatGPT Pro API Key (Optional)</Label>
+                {settings?.chatgpt_pro_api_key && (
+                  <div className="flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-md text-xs">
+                    <CheckCircle className="w-3 h-3" />
+                    <span>API Key Configured</span>
+                  </div>
+                )}
+              </div>
+              <div className="relative">
+                <Input
+                  id="chatgpt_pro_api_key"
+                  type="password"
+                  value={formData.chatgpt_pro_api_key}
+                  onChange={(e) => setFormData(prev => ({ ...prev, chatgpt_pro_api_key: e.target.value }))}
+                  placeholder={settings?.chatgpt_pro_api_key ? "••••••••••••••••••••••••••••••••" : "sk-proj-..."}
+                  className="mt-1 pr-10"
+                />
+                {settings?.chatgpt_pro_api_key && (
+                  <Key className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-green-600" />
+                )}
+              </div>
               <p className="text-sm text-muted-foreground mt-2">
                 Enter your ChatGPT Pro API key to use GPT-5 for significantly better analysis quality. If not provided, the default OpenAI key will be used with GPT-4o-mini.
               </p>
+              {settings?.chatgpt_pro_api_key && (
+                <p className="text-sm text-green-600 mt-1 flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" />
+                  Using GPT-5 for enhanced deep analysis
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
