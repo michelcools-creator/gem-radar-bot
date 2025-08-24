@@ -1421,6 +1421,24 @@ function calculateSecurityScore(facts: any): number {
 }
 
 async function performDeepAnalysis() {
+  // Get settings to check for ChatGPT Pro API key
+  const { data: settings } = await supabase
+    .from('settings')
+    .select('chatgpt_pro_api_key')
+    .eq('id', 1)
+    .single();
+
+  // Use ChatGPT Pro API key if available, otherwise fallback to OPENAI_API_KEY
+  const apiKey = settings?.chatgpt_pro_api_key || Deno.env.get('OPENAI_API_KEY');
+  const model = settings?.chatgpt_pro_api_key ? 'gpt-5-2025-08-07' : 'gpt-4o-mini';
+  
+  console.log(`Deep analysis using model: ${model} with ${settings?.chatgpt_pro_api_key ? 'user' : 'default'} API key`);
+
+  if (!apiKey) {
+    console.error('No API key configured for deep analysis');
+    return;
+  }
+
   // Get coins that are ready for deep analysis
   const { data: coinsForDeepAnalysis, error } = await supabase
     .from('coins')
@@ -1559,11 +1577,11 @@ Return ONLY a valid JSON object with this exact structure:
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-5-2025-08-07', // Use GPT-5 for deep analysis
+          model: model,
           messages: [
             {
               role: 'system',
@@ -1574,7 +1592,9 @@ Return ONLY a valid JSON object with this exact structure:
               content: deepAnalysisPrompt
             }
           ],
-          max_completion_tokens: 4000
+          ...(model.startsWith('gpt-5') || model.startsWith('gpt-4.1') || model.startsWith('o3') || model.startsWith('o4') 
+            ? { max_completion_tokens: 4000 } 
+            : { max_tokens: 4000 })
         }),
       });
 
