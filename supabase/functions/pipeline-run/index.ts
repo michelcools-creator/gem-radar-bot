@@ -1235,7 +1235,7 @@ async function calculateScores() {
   for (const coin of coinsWithFacts) {
     try {
       const facts = coin.facts[0]?.extracted as any;
-      const scores = calculateCoinScore(facts, weights);
+      const scores = calculateCoinScore(facts, weights, coin);
       
       await supabase
         .from('scores')
@@ -1268,7 +1268,7 @@ async function calculateScores() {
   }
 }
 
-function calculateCoinScore(facts: any, weights: Record<string, number>) {
+function calculateCoinScore(facts: any, weights: Record<string, number>, coin: any) {
   const pillars: Record<string, number> = {};
   let penalties = 0;
   const red_flags: string[] = [];
