@@ -1432,8 +1432,12 @@ function calculateCoinScore(facts: any, weights: Record<string, number>, coin: a
     }
   };
 }
-                                lang.toLowerCase().includes("misleading") || 
-                                lang.toLowerCase().includes("contradictory"));
+
+function applyPenaltiesAndCaps(facts: any, finalScore: number): { finalScore: number, overall_cap: number | null, red_flags: string[] } {
+  const red_flags: string[] = [];
+  
+  // Check for contradictory information
+  const hasContradictoryInfo = facts.contradictions && facts.contradictions.length > 0;
   
   let overall_cap = null;
   if (hasContradictoryInfo) {
