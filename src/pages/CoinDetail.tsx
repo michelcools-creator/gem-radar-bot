@@ -241,6 +241,7 @@ const CoinDetail = () => {
               redFlags={latestFacts.red_flags || {}}
               contradictions={latestFacts.contradictions}
               overallCap={latestScore?.overall_cap}
+              onChainTraction={latestFacts.on_chain_traction}
             />
           )}
 

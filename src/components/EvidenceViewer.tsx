@@ -38,6 +38,17 @@ interface EvidenceViewerProps {
     proof_urls: string[];
   }>;
   overallCap?: number | null;
+  onChainTraction?: {
+    partners?: Array<{
+      name: string;
+      proof_url: string;
+    }>;
+    integrations?: Array<{
+      name: string;
+      type: 'dex' | 'l2' | 'wallet' | 'oracle' | 'infra' | 'exchange';
+      proof_url: string;
+    }>;
+  };
 }
 
 const getPillarIcon = (pillar: string) => {
@@ -76,7 +87,8 @@ export const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
   claims,
   redFlags,
   contradictions,
-  overallCap
+  overallCap,
+  onChainTraction
 }) => {
   const [selectedPillar, setSelectedPillar] = useState<string>('all');
   
@@ -176,6 +188,66 @@ export const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* On-Chain Traction Section */}
+            {onChainTraction && (onChainTraction.partners?.length > 0 || onChainTraction.integrations?.length > 0) && (
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2 flex items-center gap-2 text-purple-700">
+                  <Network className="w-4 h-4" />
+                  On-Chain Traction
+                </h4>
+                <div className="space-y-3">
+                  {onChainTraction.partners?.length > 0 && (
+                    <div>
+                      <h5 className="text-sm font-medium mb-2">Partners ({onChainTraction.partners.length})</h5>
+                      <div className="grid gap-2">
+                        {onChainTraction.partners.map((partner, i) => (
+                          <div key={i} className="flex items-center justify-between p-2 bg-purple-50 border border-purple-200 rounded-lg">
+                            <span className="text-sm font-medium">{partner.name}</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => window.open(partner.proof_url, '_blank')}
+                              className="text-xs"
+                            >
+                              <ExternalLink className="w-3 h-3 mr-1" />
+                              View
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {onChainTraction.integrations?.length > 0 && (
+                    <div>
+                      <h5 className="text-sm font-medium mb-2">Integrations ({onChainTraction.integrations.length})</h5>
+                      <div className="grid gap-2">
+                        {onChainTraction.integrations.map((integration, i) => (
+                          <div key={i} className="flex items-center justify-between p-2 bg-purple-50 border border-purple-200 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{integration.name}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {integration.type}
+                              </Badge>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => window.open(integration.proof_url, '_blank')}
+                              className="text-xs"
+                            >
+                              <ExternalLink className="w-3 h-3 mr-1" />
+                              View
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

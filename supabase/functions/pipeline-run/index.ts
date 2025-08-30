@@ -1580,24 +1580,28 @@ function calculateProductScoreFromClaims(productClaims: any[]): number {
 function calculateTractionScoreFromClaims(tractionClaims: any[], onChainTraction: any): number {
   let score = 0;
   
-  // Partners scoring - 0=none, 1-4=progressively more points, ≥3=max
+  // Partners scoring: 0=none, 1=25pts, 2=45pts, 3=65pts, ≥4=85pts
   const partnerCount = onChainTraction?.partners?.length || 0;
-  if (partnerCount === 1) score += 40;
-  else if (partnerCount === 2) score += 60; 
-  else if (partnerCount === 3) score += 80;
-  else if (partnerCount >= 4) score += 100;
+  if (partnerCount === 1) score += 25;
+  else if (partnerCount === 2) score += 45; 
+  else if (partnerCount === 3) score += 65;
+  else if (partnerCount >= 4) score += 85;
   
-  // Integrations scoring with quality weighting
+  // Integrations scoring with quality weighting (max additional 15 points)
   const integrations = onChainTraction?.integrations || [];
+  let integrationScore = 0;
   integrations.forEach((integration: any) => {
     if (integration.type === 'infra' || integration.type === 'exchange') {
-      score += 15; // Higher value integrations
+      integrationScore += 4; // Higher value integrations (+1 bonus)
     } else {
-      score += 10; // Standard integrations
+      integrationScore += 3; // Standard integrations (dex, l2, wallet, oracle)
     }
   });
   
-  // Additional traction claims
+  // Cap integration bonus at 15 points
+  score += Math.min(15, integrationScore);
+  
+  // Additional traction claims from general mentions
   const partnerClaims = tractionClaims.filter(c => c.type === 'partner');
   const integrationClaims = tractionClaims.filter(c => c.type === 'integration');
   
