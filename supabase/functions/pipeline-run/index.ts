@@ -1505,21 +1505,22 @@ function calculateCoinScore(facts: any, weights: Record<string, number>, coin: a
   
   const confidence = Math.round((0.6 * coverage + 0.2 * sourceDiversity + 0.2 * freshness) * 100) / 100;
   
-  return {
-    overall: Math.round(finalScore),
-    overall_cap,
-    confidence,
-    pillars,
-    penalties,
-    red_flags,
-    green_flags,
-    confidence_factors: {
-      coverage,
-      source_diversity: sourceDiversity,
-      freshness
-    }
-  };
-}
+   return {
+     overall: Math.round(finalScore),
+     overall_cap,
+     confidence,
+     pillars,
+     penalties,
+     red_flags,
+     green_flags,
+     summary: `Score: ${Math.round(finalScore)}/100 (Confidence: ${Math.round(confidence * 100)}%)`,
+     confidence_factors: {
+       coverage,
+       source_diversity: sourceDiversity,
+       freshness
+     }
+   };
+ }
 
 function applyPenaltiesAndCaps(facts: any, pillars: any, baseScore: number): { 
   finalScore: number, 
@@ -2055,37 +2056,17 @@ Return ONLY a valid JSON object with this exact structure:
         })
         .eq('id', coin.id);
 
-      console.log(`Deep analysis completed for ${coin.name}`);
-      
-      // Small delay to respect rate limits
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
+      console.log(`Completed deep analysis for ${coin.name}`);
     } catch (error) {
-      console.error(`Error in deep analysis for ${coin.name}:`, error);
+      console.error(`Error in deep analysis for coin ${coin.id}:`, error);
       
-      // Mark coin as analyzed even if deep analysis fails
+      // Mark coin as analyzed anyway to prevent getting stuck
       await supabase
         .from('coins')
-        .update({ 
-          status: 'analyzed',
-          updated_at: new Date().toISOString()
-        })
+        .update({ status: 'analyzed' })
         .eq('id', coin.id);
     }
   }
-}
-  
-  // Deduct for risky language
-  if (facts.security.risky_language && facts.security.risky_language.length > 0) {
-    score -= facts.security.risky_language.length * 15; // Heavy penalty
-  }
-  
-  // Proof URLs quality
-  if (facts.security.proof_urls && facts.security.proof_urls.length > 1) {
-    score += 10; // Multiple sources
-  }
-  
-  return Math.min(100, Math.max(0, score));
 }
 
 function calculateTokenomicsScore(facts: any): number {
