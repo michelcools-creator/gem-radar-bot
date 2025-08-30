@@ -3,8 +3,6 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
 import { JSDOM } from "https://esm.sh/jsdom@24.0.0";
 import { Readability } from "https://esm.sh/@mozilla/readability@0.6.0";
-// @ts-ignore
-import pdfParse from "https://esm.sh/pdf-parse@1.1.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -986,68 +984,32 @@ function detectJsHeavyPage(html: string, document: any): boolean {
   return hasJsFramework || highScriptRatio || hasLoadingText;
 }
 
-// Epic A4: PDF processing function
+// Epic A4: PDF processing function (simplified - no parsing for now)
 async function processPdfDocument(coinId: string, url: string): Promise<{success: boolean}> {
   try {
-    console.log(`Fetching PDF: ${url}`);
+    console.log(`PDF detected but parsing not supported in Edge Functions: ${url}`);
     
     const response = await fetch(url, {
+      method: 'HEAD',
       headers: {
         'User-Agent': 'NewCoinRadarResearchBot/1.0 (research purposes)',
       },
     });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = new Uint8Array(arrayBuffer);
-    
-    // Check size limit (200KB as specified)
-    if (buffer.length > 200 * 1024) {
-      console.log(`PDF too large (${Math.round(buffer.length / 1024)}KB), truncating to 200KB`);
-    }
-    
-    // Parse PDF with pdf-parse
-    const data = await pdfParse(buffer);
-    const pdfText = data.text || '';
-    
-    if (pdfText.length < 100) {
-      console.log(`PDF extraction yielded insufficient text: ${pdfText.length} chars`);
-      await supabase
-        .from('pages')
-        .upsert({
-          coin_id: coinId,
-          url,
-          status: 'insufficient_content',
-          http_status: response.status,
-          content_excerpt: 'PDF parsed but insufficient text content',
-          content_hash: await createContentHash(pdfText),
-          fetched_at: new Date().toISOString()
-        });
-      return { success: false };
-    }
-    
-    // Clean and limit PDF text
-    const cleanedText = cleanupExtractedText(pdfText).substring(0, 200000); // 200KB limit
-    const excerpt = cleanedText.substring(0, 600);
-    const contentHash = await createContentHash(cleanedText);
     
     await supabase
       .from('pages')
       .upsert({
         coin_id: coinId,
         url,
-        status: 'fetched',
+        status: 'pdf_detected',
         http_status: response.status,
-        content_text: cleanedText,
-        content_excerpt: excerpt,
-        content_hash: contentHash,
+        content_excerpt: 'PDF document detected - manual review recommended',
+        content_text: `PDF whitepaper detected at ${url}. Manual review recommended for tokenomics and technical details.`,
+        content_hash: await createContentHash(`PDF:${url}`),
         fetched_at: new Date().toISOString()
       });
     
-    console.log(`PDF processed successfully: ${url} (${cleanedText.length} chars)`);
+    console.log(`PDF marked for manual review: ${url}`);
     return { success: true };
     
   } catch (error) {
