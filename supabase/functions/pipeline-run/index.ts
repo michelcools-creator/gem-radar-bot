@@ -1800,59 +1800,7 @@ function calculateCommunityScoreFromClaims(communityClaims: any[]): number {
   }
   
   return Math.max(0, Math.min(100, score));
-}
-
-async function performDeepAnalysis() {
-  // Get settings to check for ChatGPT Pro API key
-  const { data: settings } = await supabase
-    .from('settings')
-    .select('chatgpt_pro_api_key')
-    .eq('id', 1)
-    .single();
-
-  // Use ChatGPT Pro API key if available, otherwise fallback to OPENAI_API_KEY
-  const apiKey = settings?.chatgpt_pro_api_key || Deno.env.get('OPENAI_API_KEY');
-  const model = settings?.chatgpt_pro_api_key ? 'gpt-5-2025-08-07' : 'gpt-4o-mini';
-  
-  console.log(`Deep analysis using model: ${model} with ${settings?.chatgpt_pro_api_key ? 'user' : 'default'} API key`);
-
-  if (!apiKey) {
-    console.error('No API key configured for deep analysis');
-    return;
-  }
-
-  // Get coins that are ready for deep analysis
-  const { data: coinsForDeepAnalysis, error } = await supabase
-    .from('coins')
-    .select(`
-      *,
-      facts!inner(*),
-      scores!inner(*),
-      pages(*)
-    `)
-    .eq('status', 'deep_analysis_pending')
-    .order('updated_at', { ascending: true })
-    .limit(2); // Limit to 2 at a time to respect rate limits
-
-  if (error) {
-    console.error('Error fetching coins for deep analysis:', error);
-    return;
-  }
-
-  if (!coinsForDeepAnalysis?.length) {
-    console.log('No coins ready for deep analysis');
-    return;
-  }
-
-  console.log(`Found ${coinsForDeepAnalysis.length} coins ready for deep analysis`);
-
-  for (const coin of coinsForDeepAnalysis) {
-    try {
-      console.log(`Starting deep analysis for ${coin.name}...`);
-      
-      const facts = coin.facts[0]?.extracted as any;
-      const scores = coin.scores[0]?.pillars as any;
-      const pages = coin.pages || [];
+function calculateTokenomicsScore(facts: any): number {
       
       // Prepare comprehensive context for deep analysis
       const contextData = {
