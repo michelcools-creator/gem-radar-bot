@@ -1638,44 +1638,13 @@ function calculateSecurityScore(facts: any): number {
     } else if (facts.security.owner_controls.toLowerCase().includes("unlimited") ||
                facts.security.owner_controls.toLowerCase().includes("full control")) {
       score -= 10;
+    }
   }
+  
+  return Math.min(100, Math.max(0, score));
 }
 
 // ===== SCORING FUNCTIONS - MOVED UP TO AVOID HOISTING ISSUES =====
-
-// Function to extract clean text from HTML as fallback
-function extractCleanTextImproved(html: string): string {
-  try {
-    // Create a new JSDOM instance
-    const dom = new JSDOM(html);
-    const document = dom.window.document;
-    
-    // Remove script and style elements
-    const scripts = document.querySelectorAll('script, style, nav, footer, header, aside');
-    scripts.forEach(el => el.remove());
-    
-    // Get text content from body or fallback to documentElement
-    const body = document.body || document.documentElement;
-    let text = body.textContent || body.innerText || '';
-    
-    // Clean up the text
-    text = text
-      .replace(/\s+/g, ' ')  // Replace multiple whitespace with single space
-      .replace(/[\n\r\t]/g, ' ')  // Replace newlines and tabs with spaces
-      .trim();
-    
-    return text;
-  } catch (error) {
-    console.log('Error in extractCleanTextImproved:', error.message);
-    // Fallback to simple text extraction
-    return html
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-      .replace(/<[^>]+>/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-}
 
 // New claims-based scoring functions
 function calculateSecurityScoreFromClaims(securityClaims: any[]): number {
