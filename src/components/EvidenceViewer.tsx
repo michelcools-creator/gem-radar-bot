@@ -129,36 +129,76 @@ export const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
           </TabsList>
 
           <TabsContent value={selectedPillar} className="space-y-4">
-            {/* Red Flags Section */}
+            {/* Red Flags & Penalties Section */}
             {(redFlags.guaranteed_returns?.length > 0 || 
               redFlags.audit_claim_no_source || 
               redFlags.suspected_copycat ||
-              redFlags.misleading_claims?.length > 0) && (
+              redFlags.misleading_claims?.length > 0 ||
+              overallCap) && (
               <div className="mb-4">
-                <h4 className="font-semibold mb-2 text-red-700">🚨 Red Flags Detected</h4>
+                <h4 className="font-semibold mb-2 text-red-700">🚨 Penalties & Risk Factors</h4>
                 <div className="space-y-2">
+                  
+                  {/* Overall Cap Warning */}
+                  {overallCap && (
+                    <div className="p-3 bg-red-50 border-2 border-red-200 rounded-lg">
+                      <Badge variant="destructive" className="mb-2">
+                        🔒 SCORE CAPPED AT {overallCap}
+                      </Badge>
+                      <p className="text-sm text-red-700">
+                        Score has been capped due to misleading or contradictory information detected.
+                      </p>
+                    </div>
+                  )}
+                  
                   {redFlags.guaranteed_returns?.map((phrase, i) => (
-                    <Badge key={i} variant="destructive" className="mr-2">
-                      Guaranteed Returns: "{phrase}"
-                    </Badge>
+                    <div key={i} className="p-2 bg-red-50 border border-red-200 rounded-lg">
+                      <Badge variant="destructive" className="mb-1">
+                        Guaranteed Returns (-5 to -15 pts)
+                      </Badge>
+                      <p className="text-sm text-red-600 italic">"{phrase}"</p>
+                    </div>
                   ))}
                   
                   {redFlags.audit_claim_no_source && (
-                    <Badge variant="destructive" className="mr-2">
-                      ⚠️ Audit claim without source
-                    </Badge>
+                    <div className="p-2 bg-red-50 border border-red-200 rounded-lg">
+                      <Badge variant="destructive" className="mb-1">
+                        ⚠️ Audit claim without source (-3 pts)
+                      </Badge>
+                      <p className="text-sm text-red-600">Audit mentioned but no verifiable source provided</p>
+                    </div>
                   )}
                   
                   {redFlags.suspected_copycat && (
-                    <Badge variant="destructive" className="mr-2">
-                      ⚠️ Copycat suspected: {redFlags.suspected_copycat.brand}
-                    </Badge>
+                    <div className="p-2 bg-orange-50 border border-orange-200 rounded-lg">
+                      <Badge variant="destructive" className="mb-1">
+                        ⚠️ Suspected copycat (-7 pts)
+                      </Badge>
+                      <p className="text-sm text-orange-700">
+                        Similar to {redFlags.suspected_copycat.brand} - {redFlags.suspected_copycat.reason}
+                      </p>
+                      {redFlags.suspected_copycat.proof_urls?.map((url, j) => (
+                        <Button
+                          key={j}
+                          variant="outline"
+                          size="sm"
+                          onClick={() => window.open(url, '_blank')}
+                          className="text-xs mt-1 mr-1"
+                        >
+                          <ExternalLink className="w-3 h-3 mr-1" />
+                          Evidence {j + 1}
+                        </Button>
+                      ))}
+                    </div>
                   )}
                   
                   {redFlags.misleading_claims?.map((claim, i) => (
-                    <Badge key={i} variant="destructive" className="mr-2">
-                      ⚠️ Misleading claim detected
-                    </Badge>
+                    <div key={i} className="p-2 bg-red-50 border border-red-200 rounded-lg">
+                      <Badge variant="destructive" className="mb-1">
+                        ⚠️ Misleading claim
+                      </Badge>
+                      <p className="text-sm text-red-600">{claim.reason}</p>
+                    </div>
                   ))}
                 </div>
               </div>

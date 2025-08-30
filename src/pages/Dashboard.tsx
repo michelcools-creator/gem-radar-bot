@@ -26,6 +26,8 @@ interface Coin {
     pillars: Record<string, number>;
     red_flags: string[];
     green_flags: string[];
+    overall_cap?: number | null;
+    penalties?: number;
   }[];
 }
 
@@ -44,7 +46,7 @@ const Dashboard = () => {
         .from('coins')
         .select(`
           id, name, symbol, first_seen, status,
-          scores:scores(overall, confidence, pillars, red_flags, green_flags)
+          scores:scores(overall, confidence, pillars, red_flags, green_flags, overall_cap, penalties)
         `)
         .order('first_seen', { ascending: false })
         .limit(50);
@@ -384,20 +386,30 @@ const Dashboard = () => {
                         )}
                       </td>
                       
-                      <td className="py-3 px-4">
-                        <div className="flex flex-col gap-1">
-                          {latestScore?.red_flags?.map((flag, i) => (
-                            <Badge key={i} variant="destructive" className="text-xs">
-                              🚩 {flag.substring(0, 20)}...
-                            </Badge>
-                          ))}
-                          {latestScore?.green_flags?.map((flag, i) => (
-                            <Badge key={i} className="text-xs bg-success text-success-foreground">
-                              ✅ {flag.substring(0, 20)}...
-                            </Badge>
-                          ))}
-                        </div>
-                      </td>
+                       <td className="py-3 px-4">
+                         <div className="flex flex-col gap-1">
+                           {latestScore?.red_flags?.map((flag, i) => (
+                             <Badge key={i} variant="destructive" className="text-xs">
+                               🚩 {flag.substring(0, 30)}...
+                             </Badge>
+                           ))}
+                           {latestScore?.green_flags?.map((flag, i) => (
+                             <Badge key={i} className="text-xs bg-success text-success-foreground">
+                               ✅ {flag.substring(0, 25)}...
+                             </Badge>
+                           ))}
+                           {latestScore?.overall_cap && (
+                             <Badge variant="destructive" className="text-xs bg-red-600 text-white">
+                               🔒 CAP {latestScore.overall_cap}
+                             </Badge>
+                           )}
+                           {latestScore?.penalties > 0 && (
+                             <Badge variant="outline" className="text-xs border-red-300 text-red-600">
+                               -{latestScore.penalties} pts
+                             </Badge>
+                           )}
+                         </div>
+                       </td>
                       
                       <td className="py-3 px-4">
                         <Badge className={`text-white ${getStatusColor(coin.status)}`}>

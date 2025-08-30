@@ -1348,57 +1348,18 @@ function calculateCoinScore(facts: any, weights: Record<string, number>, coin: a
   let communityScore = calculateCommunityScoreFromClaims(claimsByPillar.community || []);
   pillars.community = (communityScore / 100) * w.community;
   
-  // Apply penalties based on red_flags
-  if (facts.red_flags?.guaranteed_returns?.length > 0) {
-    const returnPhrases = facts.red_flags.guaranteed_returns;
-    let returnPenalty = 10; // base penalty
-    
-    // Adjust penalty based on strength of phrases (-5 to -15 range)
-    const strongPhrases = returnPhrases.filter((phrase: string) => 
-      phrase.toLowerCase().includes('100%') || 
-      phrase.toLowerCase().includes('risk-free') ||
-      phrase.toLowerCase().includes('guaranteed profit')
-    );
-    if (strongPhrases.length > 0) returnPenalty = 15;
-    else if (returnPhrases.length > 2) returnPenalty = 12;
-    
-    penalties += returnPenalty;
-    red_flags.push(`Guaranteed return promises detected (-${returnPenalty} points)`);
-  }
+  // Calculate base score from pillars
+  const baseScore = Object.values(pillars).reduce((sum, score) => sum + score, 0);
   
-  if (facts.red_flags?.audit_claim_no_source) {
-    penalties += 3;
-    red_flags.push("Audit claim without source (-3 points)");
-  }
+  // Apply penalties and caps using Epic A3 logic
+  const penaltyResult = applyPenaltiesAndCaps(facts, pillars, baseScore);
   
-  if (facts.red_flags?.suspected_copycat) {
-    penalties += 7;
-    red_flags.push(`Suspected copycat of ${facts.red_flags.suspected_copycat.brand} (-7 points)`);
-  }
-  
-  // Apply overall cap for misleading claims or contradictions
-  if ((facts.red_flags?.misleading_claims?.length > 0) || (facts.contradictions?.length > 0)) {
-    overall_cap = 20;
-    red_flags.push("Overall score capped at 20 due to misleading/contradictory information");
-  }
-  
-  // Green flags based on claims
-  const auditClaims = (facts.claims || []).filter((c: any) => c.type === 'audit');
-  const doxxedClaims = (facts.claims || []).filter((c: any) => c.type === 'doxxed_team');
-  const mvpClaims = (facts.claims || []).filter((c: any) => c.type === 'mvp');
-  
-  if (auditClaims.length > 0) green_flags.push("Security audits found");
-  if (doxxedClaims.length > 0) green_flags.push("Team is doxxed");
-  if (mvpClaims.some((c: any) => c.value?.toLowerCase().includes('yes'))) green_flags.push("MVP/Demo available");
-  if (facts.on_chain_traction?.partners?.length > 0) green_flags.push("Partnerships documented");
-  
-  const overall = Object.values(pillars).reduce((sum, score) => sum + score, 0);
-  let finalScore = Math.max(overall - penalties, 0);
-  
-  // Apply cap if set
-  if (overall_cap !== null) {
-    finalScore = Math.min(finalScore, overall_cap);
-  }
+  // Use penalty result values
+  const finalScore = penaltyResult.finalScore;
+  overall_cap = penaltyResult.overall_cap;
+  penalties = Math.abs(penaltyResult.penalties); // Store absolute value for UI
+  red_flags.push(...penaltyResult.red_flags);
+  green_flags.push(...penaltyResult.green_flags);
   
   // Calculate confidence based on evidence quality
   const totalClaims = facts.claims?.length || 0;
@@ -1433,37 +1394,99 @@ function calculateCoinScore(facts: any, weights: Record<string, number>, coin: a
   };
 }
 
-function applyPenaltiesAndCaps(facts: any, finalScore: number): { finalScore: number, overall_cap: number | null, red_flags: string[] } {
+function applyPenaltiesAndCaps(facts: any, pillars: any, baseScore: number): { 
+  finalScore: number, 
+  overall_cap: number | null, 
+  penalties: number,
+  red_flags: string[], 
+  green_flags: string[] 
+} {
+  let penalties = 0;
   const red_flags: string[] = [];
+  const green_flags: string[] = [];
   
-  // Check for contradictory information
-  const hasContradictoryInfo = facts.contradictions && facts.contradictions.length > 0;
+  // Epic A3: Apply penalties based on red flags
+  if (facts.red_flags) {
+    // Guaranteed returns penalty: -5 to -15 based on phrase severity
+    if (facts.red_flags.guaranteed_returns?.length > 0) {
+      const phrases = facts.red_flags.guaranteed_returns;
+      let guaranteePenalty = 0;
+      phrases.forEach((phrase: string) => {
+        if (phrase.toLowerCase().includes('guaranteed') || phrase.toLowerCase().includes('100%')) {
+          guaranteePenalty -= 15; // Severe penalty
+        } else if (phrase.toLowerCase().includes('risk-free') || phrase.toLowerCase().includes('safe')) {
+          guaranteePenalty -= 10; // Medium penalty  
+        } else {
+          guaranteePenalty -= 5; // Base penalty
+        }
+      });
+      penalties += guaranteePenalty;
+      red_flags.push(`Guaranteed returns language detected (${guaranteePenalty} penalty)`);
+    }
+    
+    // Audit claim without source penalty: -3
+    if (facts.red_flags.audit_claim_no_source === true) {
+      penalties -= 3;
+      red_flags.push("Audit claimed without verifiable source (-3 penalty)");
+    }
+    
+    // Suspected copycat penalty: -7 (soft penalty, reviewable)  
+    if (facts.red_flags.suspected_copycat) {
+      penalties -= 7;
+      red_flags.push(`Suspected copycat of ${facts.red_flags.suspected_copycat.brand} (-7 penalty)`);
+    }
+  }
   
+  // Check for contradictions and misleading claims -> overall cap at 20
   let overall_cap = null;
-  if (hasContradictoryInfo) {
+  const hasContradictions = facts.contradictions && facts.contradictions.length > 0;
+  const hasMisleadingClaims = facts.red_flags?.misleading_claims?.length > 0;
+  
+  if (hasContradictions || hasMisleadingClaims) {
     overall_cap = 20;
-    finalScore = Math.min(20, finalScore);
     red_flags.push("Score capped at 20 due to misleading/contradictory information");
   }
   
-  // Calculate confidence based on data coverage and freshness
-  const expectedFields = ['team', 'tokenomics', 'security', 'product', 'market', 'community'];
-  const coverageRatio = expectedFields.filter(field => 
-    facts[field] && facts[field] !== "unknown" && 
-    Object.keys(facts[field]).length > 0
-  ).length / expectedFields.length;
+  // Add green flags based on positive findings
+  if (facts.claims) {
+    const auditClaims = facts.claims.filter((c: any) => c.type === 'audit' && c.proof_urls?.length > 0);
+    if (auditClaims.length > 0) {
+      green_flags.push("Audited by third party");
+    }
+    
+    const mvpClaims = facts.claims.filter((c: any) => c.type === 'mvp' && c.value?.toLowerCase().includes('yes'));
+    if (mvpClaims.length > 0) {
+      green_flags.push("MVP/Demo available");
+    }
+    
+    const tokenomicsClaims = facts.claims.filter((c: any) => c.pillar === 'tokenomics' && c.proof_urls?.length > 0);
+    if (tokenomicsClaims.length >= 2) {
+      green_flags.push("Tokenomics documented");
+    }
+    
+    const communityClaims = facts.claims.filter((c: any) => c.pillar === 'community');
+    if (communityClaims.length >= 2) {
+      green_flags.push("Active on multiple channels");
+    }
+  }
   
-  const confidence = Math.min(1, coverageRatio);
+  // Calculate final score with penalties applied
+  let finalScore = baseScore + penalties;
+  
+  // Apply overall cap if set
+  if (overall_cap !== null) {
+    finalScore = Math.min(overall_cap, finalScore);
+  }
+  
+  // Ensure score stays within bounds
+  finalScore = Math.max(0, Math.min(100, finalScore));
   
   return {
-    overall: Math.round(Math.min(100, Math.max(0, finalScore))),
-    overall_cap: overall_cap,
-    confidence: Math.round(confidence * 100) / 100,
-    pillars,
+    finalScore: Math.round(finalScore),
+    overall_cap,
     penalties,
     red_flags,
-    green_flags,
-    summary: `Score: ${Math.round(finalScore)}/100 (${Math.round(confidence * 100)}% confidence)${overall_cap ? ` - CAPPED AT ${overall_cap}` : ''}`
+    green_flags
   };
 }
 
