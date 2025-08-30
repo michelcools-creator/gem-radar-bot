@@ -2,6 +2,9 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0';
 import { JSDOM } from "https://esm.sh/jsdom@24.0.0";
+import { Readability } from "https://esm.sh/@mozilla/readability@0.6.0";
+// @ts-ignore
+import pdfParse from "https://esm.sh/pdf-parse@1.1.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -690,7 +693,7 @@ async function handleRetries() {
 }
 
 async function fetchPages() {
-  console.log('Fetching pages...');
+  console.log('Fetching pages with Epic A4 Readability & PDF extraction...');
   
   const { data: coins } = await supabase
     .from('coins')
@@ -719,6 +722,18 @@ async function fetchPages() {
       
       while (attempt < maxAttempts) {
         try {
+          // Check if URL is a PDF
+          const isPdf = url.toLowerCase().includes('.pdf') || url.toLowerCase().includes('pdf');
+          
+          if (isPdf) {
+            console.log(`Processing PDF: ${url}`);
+            const pdfResult = await processPdfDocument(coin.id, url);
+            if (pdfResult.success) {
+              successfulPages++;
+            }
+            break; // Exit retry loop for PDF
+          }
+          
           // Head request first to check content type
           const headResponse = await fetch(url, {
             method: 'HEAD',
@@ -729,7 +744,17 @@ async function fetchPages() {
           
           const contentType = headResponse.headers.get('content-type') || '';
           
-          // Skip non-HTML content
+          // Handle PDF content type
+          if (contentType.includes('application/pdf')) {
+            console.log(`PDF detected by content-type: ${url}`);
+            const pdfResult = await processPdfDocument(coin.id, url);
+            if (pdfResult.success) {
+              successfulPages++;
+            }
+            break;
+          }
+          
+          // Skip non-HTML content (except already handled PDFs)
           if (!contentType.includes('text/html') && !contentType.includes('text/plain')) {
             console.log(`Skipping non-HTML content: ${url} (${contentType})`);
             await supabase
@@ -754,7 +779,7 @@ async function fetchPages() {
           if (response.ok) {
             const html = await response.text();
             
-            // Validate that we got actual HTML content, not an image or binary data
+            // Validate that we got actual HTML content
             if (html.length < 100 || !html.includes('<') || html.startsWith('data:image')) {
               console.log(`Invalid HTML content from ${url}: length=${html.length}`);
               await supabase
@@ -770,21 +795,30 @@ async function fetchPages() {
               break;
             }
             
-            // Use improved text extraction with readability-like approach
-            const cleanText = extractCleanTextImproved(html);
-            const excerpt = cleanText.substring(0, 1000);
+            // Epic A4: Enhanced content extraction with Readability + JS detection
+            const extractionResult = await extractContentWithReadability(html, url);
             
-            // Validate extracted text quality
-            if (cleanText.length < 50) {
-              console.log(`Insufficient content extracted from ${url}: ${cleanText.length} chars`);
+            // Create content hash for deduplication
+            const contentHash = await createContentHash(extractionResult.content);
+            
+            // Create 600-char excerpt as specified
+            const excerpt = extractionResult.content.substring(0, 600);
+            
+            // Validate extracted content quality
+            if (extractionResult.content.length < 50) {
+              console.log(`Insufficient content extracted from ${url}: ${extractionResult.content.length} chars`);
+              
+              const status = extractionResult.isJsHeavy ? 'js_empty' : 'insufficient_content';
+              
               await supabase
                 .from('pages')
                 .upsert({
                   coin_id: coin.id,
                   url,
-                  status: 'invalid_content',
+                  status,
                   http_status: response.status,
-                  content_excerpt: 'Insufficient extractable content',
+                  content_excerpt: extractionResult.isJsHeavy ? 'JS-heavy SPA detected, no extractable content' : 'Insufficient extractable content',
+                  content_hash: contentHash,
                   fetched_at: new Date().toISOString()
                 });
               break;
@@ -797,8 +831,9 @@ async function fetchPages() {
                 url,
                 status: 'fetched',
                 http_status: response.status,
-                content_text: cleanText.substring(0, 200000), // 200KB limit
+                content_text: extractionResult.content.substring(0, 200000), // 200KB limit
                 content_excerpt: excerpt,
+                content_hash: contentHash,
                 fetched_at: new Date().toISOString()
               });
             
@@ -885,72 +920,168 @@ function isAllowedDomain(url: string, allowedDomains: string[]): boolean {
   }
 }
 
-function extractCleanTextImproved(html: string): string {
+// Epic A4: Enhanced content extraction with Mozilla Readability + JS detection
+async function extractContentWithReadability(html: string, url: string): Promise<{content: string, isJsHeavy: boolean}> {
   try {
-    // Use JSDOM for better HTML parsing similar to Readability
-    const dom = new JSDOM(html);
+    const dom = new JSDOM(html, { url });
     const document = dom.window.document;
 
-    // Remove unwanted elements
-    const unwantedSelectors = [
-      'script', 'style', 'nav', 'header', 'footer', 'aside', 
-      'form', '.sidebar', '.navigation', '.menu', '.ad', '.advertisement',
-      '.social', '.share', '.comment', '.cookie', '.popup', '.modal'
-    ];
+    // Check if page is JS-heavy/SPA by looking for indicators
+    const isJsHeavy = detectJsHeavyPage(html, document);
     
-    unwantedSelectors.forEach(selector => {
-      const elements = document.querySelectorAll(selector);
-      elements.forEach(el => el.remove());
-    });
-
-    // Prioritize main content areas
-    let contentElement = null;
+    // Try Mozilla Readability first
+    const reader = new Readability(document);
+    const article = reader.parse();
     
-    // Try to find main content in order of preference
-    const contentSelectors = [
-      'article', 'main', '[role="main"]', '.content', '.post-content', 
-      '.entry-content', '.article-content', '.page-content', '#content',
-      '.container .row', 'body'
-    ];
-    
-    for (const selector of contentSelectors) {
-      contentElement = document.querySelector(selector);
-      if (contentElement && contentElement.textContent && contentElement.textContent.trim().length > 500) {
-        break;
-      }
+    if (article && article.textContent && article.textContent.trim().length > 100) {
+      console.log(`Readability extraction successful for ${url}: ${article.textContent.length} chars`);
+      return {
+        content: cleanupExtractedText(article.textContent),
+        isJsHeavy
+      };
     }
     
-    if (!contentElement) {
-      contentElement = document.body || document.documentElement;
-    }
-
-    // Extract and clean text
-    let text = contentElement.textContent || '';
+    // Fallback to improved manual extraction
+    console.log(`Readability failed for ${url}, using fallback extraction`);
+    const fallbackText = extractCleanTextImproved(html);
     
-    // Clean up whitespace and formatting
-    text = text
-      .replace(/\s+/g, ' ')  // Multiple whitespace to single space
-      .replace(/\n\s*\n/g, '\n\n')  // Multiple newlines to double
-      .replace(/[^\S\n]+/g, ' ')  // Multiple non-newline whitespace to single space
-      .trim();
-    
-    // Remove very short lines that are likely navigation or metadata
-    const lines = text.split('\n');
-    const meaningfulLines = lines.filter(line => {
-      const trimmed = line.trim();
-      return trimmed.length > 20 && 
-             !trimmed.match(/^(home|about|contact|login|register|search|menu)$/i) &&
-             !trimmed.match(/^\d+$/) && // Just numbers
-             !trimmed.match(/^[^a-zA-Z]*$/); // No letters
-    });
-    
-    return meaningfulLines.join('\n').substring(0, 200000); // 200KB limit
+    return {
+      content: fallbackText,
+      isJsHeavy: isJsHeavy && fallbackText.length < 200 // Only mark as JS-heavy if also poor extraction
+    };
     
   } catch (error) {
-    console.log('JSDOM parsing failed, falling back to regex:', error.message);
-    // Fallback to regex-based parsing
-    return extractCleanTextFallback(html);
+    console.log(`Content extraction error for ${url}:`, error.message);
+    return {
+      content: extractCleanTextFallback(html),
+      isJsHeavy: true
+    };
   }
+}
+
+function detectJsHeavyPage(html: string, document: any): boolean {
+  // Look for SPA/JS framework indicators
+  const jsIndicators = [
+    /<div[^>]*id=["\']?react-root["\']?/i,
+    /<div[^>]*id=["\']?root["\']?/i,
+    /<script[^>]*src=[^>]*react[^>]*>/i,
+    /<script[^>]*src=[^>]*angular[^>]*>/i,
+    /<script[^>]*src=[^>]*vue[^>]*>/i,
+    /ng-app|ng-controller|v-app|v-if/i,
+    /"__NEXT_DATA__"/i,
+    /"__NUXT__"/i
+  ];
+  
+  const hasJsFramework = jsIndicators.some(regex => regex.test(html));
+  
+  // Check for very little static text content vs script tags
+  const scriptTags = (html.match(/<script/gi) || []).length;
+  const textContent = document.body ? document.body.textContent?.trim().length || 0 : 0;
+  const highScriptRatio = scriptTags > 5 && textContent < 500;
+  
+  // Check for common loading/placeholder text
+  const commonLoadingTexts = /loading|please wait|javascript.*required|enable.*javascript/i;
+  const hasLoadingText = commonLoadingTexts.test(html);
+  
+  return hasJsFramework || highScriptRatio || hasLoadingText;
+}
+
+// Epic A4: PDF processing function
+async function processPdfDocument(coinId: string, url: string): Promise<{success: boolean}> {
+  try {
+    console.log(`Fetching PDF: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'NewCoinRadarResearchBot/1.0 (research purposes)',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = new Uint8Array(arrayBuffer);
+    
+    // Check size limit (200KB as specified)
+    if (buffer.length > 200 * 1024) {
+      console.log(`PDF too large (${Math.round(buffer.length / 1024)}KB), truncating to 200KB`);
+    }
+    
+    // Parse PDF with pdf-parse
+    const data = await pdfParse(buffer);
+    const pdfText = data.text || '';
+    
+    if (pdfText.length < 100) {
+      console.log(`PDF extraction yielded insufficient text: ${pdfText.length} chars`);
+      await supabase
+        .from('pages')
+        .upsert({
+          coin_id: coinId,
+          url,
+          status: 'insufficient_content',
+          http_status: response.status,
+          content_excerpt: 'PDF parsed but insufficient text content',
+          content_hash: await createContentHash(pdfText),
+          fetched_at: new Date().toISOString()
+        });
+      return { success: false };
+    }
+    
+    // Clean and limit PDF text
+    const cleanedText = cleanupExtractedText(pdfText).substring(0, 200000); // 200KB limit
+    const excerpt = cleanedText.substring(0, 600);
+    const contentHash = await createContentHash(cleanedText);
+    
+    await supabase
+      .from('pages')
+      .upsert({
+        coin_id: coinId,
+        url,
+        status: 'fetched',
+        http_status: response.status,
+        content_text: cleanedText,
+        content_excerpt: excerpt,
+        content_hash: contentHash,
+        fetched_at: new Date().toISOString()
+      });
+    
+    console.log(`PDF processed successfully: ${url} (${cleanedText.length} chars)`);
+    return { success: true };
+    
+  } catch (error) {
+    console.error(`Error processing PDF ${url}:`, error.message);
+    await supabase
+      .from('pages')
+      .upsert({
+        coin_id: coinId,
+        url,
+        status: 'failed',
+        http_status: null,
+        content_excerpt: `PDF processing error: ${error.message}`,
+        fetched_at: new Date().toISOString()
+      });
+    return { success: false };
+  }
+}
+
+// Epic A4: Content hash for deduplication
+async function createContentHash(content: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(content.trim().toLowerCase());
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
+}
+
+function cleanupExtractedText(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')  // Multiple whitespace to single space
+    .replace(/\n\s*\n/g, '\n\n')  // Multiple newlines to double
+    .replace(/[^\S\n]+/g, ' ')  // Multiple non-newline whitespace to single space
+    .replace(/(.)\1{4,}/g, '$1$1$1')  // Reduce repeated characters (more than 4) to 3
+    .trim();
 }
 
 function extractCleanTextFallback(html: string): string {
